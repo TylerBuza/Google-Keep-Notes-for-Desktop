@@ -2,8 +2,8 @@
 
 ## For users
 
-The current 2.3.0 setup is held as an unpublished draft pending review of
-antivirus findings. No clean-binary claim is made.
+The 2.3.0 setup is published with unresolved antivirus findings disclosed in its
+release notes and attached summaries. No clean-binary claim is made.
 
 Download only from this project's
 [GitHub releases](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases).

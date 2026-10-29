@@ -47,7 +47,7 @@ def test_readme_images_exist_and_are_real_nonempty_renders(qapp):
         assert image.height() >= 300
     assert "fictional" in readme
     assert "VirusTotal" not in readme
-    assert "unpublished draft" in readme
+    assert "unpublished draft" not in readme
     assert "antivirus findings" in readme
     assert "not a" in readme and "security guarantee" in readme
 

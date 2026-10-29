@@ -4,11 +4,11 @@
 
 **The familiar Keep web-style experience, rebuilt as a native Windows app—with floating, pinnable desktop notes.**
 
-[![Release status](https://img.shields.io/badge/Windows_setup-draft-fbbc04)](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases)
+[![Download](https://img.shields.io/github/v/release/TylerBuza/Google-Keep-Notes-for-Desktop?label=Windows%20setup&color=fbbc04)](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases/latest)
 [![Tests](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/actions/workflows/test.yml/badge.svg)](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/actions/workflows/test.yml)
 [![AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
-[Windows releases](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases) · [Security](SECURITY.md) · [Release verification](docs/RELEASES.md) · [Issues](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/issues)
+[Download for Windows](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases/latest) · [Security](SECURITY.md) · [Release verification](docs/RELEASES.md) · [Issues](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/issues)
 
 ![Native dashboard and floating notes](docs/images/overview.png)
 
@@ -47,10 +47,10 @@ fictional, not a personal account capture.*
 
 ## Install & connect
 
-**Windows 10/11 x64.** The current setup remains an unpublished draft while
-antivirus findings are reviewed. Published installers and `.sha256` files will
-appear on the [releases page](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases).
-Let sync finish, save edits, and **tray → Quit** before upgrading.
+**Windows 10/11 x64.** Download the setup EXE and its `.sha256` file from the
+[latest release](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases/latest).
+Unresolved antivirus findings are disclosed in the release notes; this is not a
+clean-binary claim. Let sync finish, save edits, and **tray → Quit** before upgrading.
 
 Start offline, or use the tray to sign in through Google's visible HTTPS page.
 Remembered sign-in stores a powerful token protected for your Windows user.
