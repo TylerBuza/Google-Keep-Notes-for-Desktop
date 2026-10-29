@@ -90,3 +90,21 @@ before freezing rather than shipping the development sentinel `0.0.0`.
 
 Maintainer antivirus tools are release-time tooling only. No VirusTotal traffic
 or API credential is added to the installed app's Google-only runtime networking.
+
+### API-based scans
+
+`tools/scan_release_virustotal.py` uses the official VirusTotal API and a
+process-local `VT_API_KEY`. Keep that key outside Git, shell history, screenshots,
+and release assets. Do not pass it as a command-line argument. The tool verifies
+both checksum sidecars before uploading, uses the large-file endpoint when
+needed, limits request frequency, and waits for completed exact-hash analyses.
+
+```powershell
+# Supply VT_API_KEY securely in this process before running; never commit it.
+.\.venv\Scripts\python.exe tools/scan_release_virustotal.py <artifact-directory> --version 2.3.0 --source-commit <exact-40-character-sha> --output <report-directory>
+```
+
+It writes `virustotal-installer.json` and `virustotal-application.json`, including
+engine totals, any detections, and permanent hash-based report links. Exit code
+2 means detections were reported, not that they were dismissed; exit code 1
+means verification did not complete. Neither is an automatic publication pass.

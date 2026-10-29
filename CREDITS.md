@@ -18,11 +18,17 @@ https://github.com/LukeCGG/Keep-Desktop
 
 Starting revision: `60a70ffee9bed33fbc1aa373203a89a03df7dc3f` (v2.2.0).
 
-Thank you to the original author and contributors for the desktop-note and
-Google Keep integration foundation. Original source history, author information,
-and existing copyright notices are retained. Subsequent work in this repository
-includes the native dashboard, floating-note theme, local typography, and
-authentication, storage, and sync hardening.
+Thank you to the original author and contributors for the floating sticky-note,
+desktop-pinning, and Google Keep integration foundation. Original source history,
+author information, and existing copyright notices are retained.
+
+This project **significantly expands and redesigns that foundation**, recreating
+Keep's web-style browsing/editing experience in a native Windows dashboard while
+retaining the original floating sticky-note concept. Additions include searchable
+masonry cards, in-app editors, content-sized layouts, a redesigned floating-note
+theme, bundled local typography, and substantial authentication, encrypted
+storage, conflict/recovery, and sync hardening. That expansion is not a claim of
+complete Google Keep feature parity or an entirely from-scratch implementation.
 
 The application remains licensed under **AGPL-3.0**; see [LICENSE](LICENSE).
 Credit is in addition to, not a substitute for, compliance with that license.
