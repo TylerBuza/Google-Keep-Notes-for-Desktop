@@ -7,6 +7,27 @@ import sys
 import tempfile
 
 
+def fictional_notes():
+    """Shared demo content only; never load an installed user's note cache."""
+    from note_model import KeepNote
+    return [
+        KeepNote(id="demo-1", title="A little inspiration", pinned=True, labels=["Ideas"],
+                 color_hex="#FFFFFF", text="Make room for the things that matter.\n\nOne good idea at a time."),
+        KeepNote(id="demo-2", title="This week", pinned=True, color_hex="#AECBFA", is_list=True,
+                 list_items=[{"text": "Sketch the next project", "checked": False},
+                             {"text": "Pick up groceries", "checked": False},
+                             {"text": "Clear the desk", "checked": True}]),
+        KeepNote(id="demo-3", title="Weekend plans", color_hex="#CCFF90",
+                 text="A walk, a good book,\nand absolutely no alarms."),
+        KeepNote(id="demo-4", title="", labels=["Ideas"],
+                 color_hex="#FFFFFF", text="You don’t have to do it all today."),
+        KeepNote(id="demo-5", title="Small improvements", color_hex="#FDCFE8",
+                 text="Less clutter.\nMore breathing room.\nA place for every idea."),
+        KeepNote(id="demo-6", title="Reading list", color_hex="#E8EAED",
+                 text="A thoughtful essay\nA very long novel\nSomething completely different"),
+    ]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
@@ -26,22 +47,7 @@ def main():
         from note_manager import NoteManagerDialog
 
         app = QApplication([])
-        samples = [
-            KeepNote(id="demo-1", title="A little inspiration", pinned=True, labels=["Ideas"],
-                     color_hex="#FFFFFF", text="Make room for the things that matter.\n\nOne good idea at a time."),
-            KeepNote(id="demo-2", title="This week", pinned=True, color_hex="#AECBFA", is_list=True,
-                     list_items=[{"text": "Sketch the next project", "checked": False},
-                                 {"text": "Pick up groceries", "checked": False},
-                                 {"text": "Clear the desk", "checked": True}]),
-            KeepNote(id="demo-3", title="Weekend plans", color_hex="#CCFF90",
-                     text="A walk, a good book,\nand absolutely no alarms."),
-            KeepNote(id="demo-4", title="", labels=["Ideas"],
-                     color_hex="#FFFFFF", text="You don’t have to do it all today."),
-            KeepNote(id="demo-5", title="Small improvements", color_hex="#FDCFE8",
-                     text="Less clutter.\nMore breathing room.\nA place for every idea."),
-            KeepNote(id="demo-6", title="Reading list", color_hex="#E8EAED",
-                     text="A thoughtful essay\nA very long novel\nSomething completely different"),
-        ]
+        samples = fictional_notes()
         notes = {note.id: note for note in samples}
         dashboard = NoteManagerDialog(notes, {"demo-1": True})
         dashboard.set_sync_state(True, args.two_way)

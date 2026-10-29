@@ -10,6 +10,7 @@
 #endif
 
 #define MyAppName        "KeepDesktop"
+#define MyAppDisplayName "Google Keep Notes for Desktop"
 #define MyAppPublisher   "TylerBuza"
 #define MyAppURL         "https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop"
 #define MyAppExeName     "KeepDesktop.exe"
@@ -21,10 +22,10 @@
 [Setup]
 ; Private-build identity; never register as an upgrade to the upstream installer.
 AppId={{E7720D5B-8CF2-4C7A-A6DA-6CA4B9A6A4DD}}
-AppName={#MyAppName}
+AppName={#MyAppDisplayName}
 AppVersion={#MyAppVersion}
 VersionInfoVersion={#MyAppNumericVersion}
-AppVerName={#MyAppName} {#MyAppVersion}
+AppVerName={#MyAppDisplayName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
@@ -34,7 +35,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 LicenseFile=LICENSE
 OutputDir=Output
-OutputBaseFilename=KeepDesktop-Setup-{#MyAppVersion}
+OutputBaseFilename=Google-Keep-Notes-for-Desktop-Setup-{#MyAppVersion}
 Compression=lzma2/ultra
 SolidCompression=yes
 WizardStyle=modern

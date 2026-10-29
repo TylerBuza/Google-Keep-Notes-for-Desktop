@@ -1,278 +1,231 @@
+<div align="center">
+
 # Google Keep Notes for Desktop
 
-**An unofficial Google Keep client for Windows**, with a native Keep-style
-dashboard, floating desktop notes, and guarded two-way sync.
+**Your notes. Beyond the browser.**
 
-![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)
+A native Windows dashboard, floating desktop notes, and guarded Google Keep sync.
 
-Maintained by [TylerBuza](https://github.com/TylerBuza) in the private, standalone
-[Google-Keep-Notes-for-Desktop](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop)
-repository. This project has its own development and releases; it is not a
-GitHub fork or an official Google product.
+[![Download](https://img.shields.io/github/v/release/TylerBuza/Google-Keep-Notes-for-Desktop?label=Windows%20setup&color=fbbc04)](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases/latest)
+[![Tests](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/actions/workflows/test.yml/badge.svg)](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/actions/workflows/test.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
-Built on [LukeCGG's Keep-Desktop](https://github.com/LukeCGG/Keep-Desktop).
-Original code, history, author credit, and the AGPL-3.0 license are retained.
-See [CREDITS.md](CREDITS.md) for provenance and third-party notices.
+[Download Windows setup](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases/latest) · [Release verification](docs/RELEASES.md) · [Security](SECURITY.md) · [Report an issue](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/issues)
 
-## Privacy and sync safeguards
+![Native dashboard and floating notes](docs/images/overview.png)
 
-- **Remembered Google sign-in:** the requested desktop mode saves a powerful
-  master token with Windows encryption after checkbox consent. It
-  renews Keep access across restarts, with no fixed app time limit.
-- **Protected remembered credentials and notes:** per-Windows-user DPAPI encryption,
-  atomic saves, migration of the old plaintext cache/token, and sign-out
-  that clears both stored credentials and in-memory access. Login cookies
-  use an off-the-record browser profile.
-- **Cloud writes are OFF initially.** Export a Google Takeout backup first,
-  then opt in via **Two-way Google Keep sync (text, pins, checklists)** in the tray.
-  New explicit consent is remembered for the same account across reconnects;
-  sign-out, read failures and uncertain writes still disable writing.
-- **Fail-safe sync:** reject malformed/incomplete responses, roll back failed
-  paginated pulls, refuse writes against stale/unverified state, and pause
-  after uncertain writes. A persistent write-intent marker also pauses after
-  a crash during a request. No silent legacy-writer fallback.
-- **Conflicts preserve both versions:** any concurrent change to a note's
-  text, formatting, title, colors or checklist pauses its push. Choose a
-  version from **Resolve sync conflicts…**, or copy text from **View saved
-  recovery copies…**. The policy is intentionally conservative, including
-  non-overlapping edits to the same note. No automatic local-wins merge.
-- **No automatic installer updates:** unsigned upstream binaries cannot
-  silently replace this build. Dependency versions used for testing are
-  frozen with exact wheel SHA256 hashes in `requirements.lock`.
-- **Guarded experimental login:** visible HTTPS origin/path, strict navigation
-  and resource allowlists, rejected certificate errors, no popups/downloads,
-  no manual-cookie/CLI capture bypass, and no automatic import of old logins.
-  See [the login review](security/LOGIN-REVIEW.md) for tested checks and limits.
-- **Google-only runtime networking:** exact Google-owned destination lists,
-  direct HTTPS without environment/system proxies, and no runtime updater.
-  Notes cannot fetch linked resources or launch external links. This is an
-  app-level restriction, not an OS firewall or protection from compromised software.
+</div>
 
-Google’s internal API is **still unofficial**. This is not an officially
-supported integration. See [SECURITY.md](SECURITY.md) for limits and recovery guidance.
+> **Unofficial and experimental.** This is not a Google product or a supported
+> Google API integration. Export a Google Takeout backup before enabling cloud
+> writes. The installer is currently unsigned; an antivirus report is not a
+> security guarantee. Review the release hashes, scan results, and known limits.
 
-## Download & Install
+## A desktop home for your notes
 
-Private installers are built from this repository's GitHub Actions workflow;
-run from source using the commands below if preferred. Installers from the
-original project do **not** include this project's changes. No installer has
-been security-certified.
+Keep your notes in a familiar dark dashboard—or pull a few onto your desktop
+while you work. Search, edit, organize, and switch between the two without
+turning a browser tab into your workspace.
 
-The executable, install folder, and application-data folder retain the internal
-name `KeepDesktop` for compatibility with existing installations and saved notes.
-The repository's name does not change credentials, note storage, or sync consent.
+- **A native Keep-style dashboard.** Masonry cards, search, grid/list layouts,
+  pinned sections, labels already present in the local model, and note colors.
+- **Floating desktop notes.** Move and resize individual notes, keep them above
+  other windows, hide them without deleting, and restore their placement later.
+- **Editing that stays out of the way.** Card-colored in-app editors save locally
+  when closed or clicked outside. Floating notes wrap titles and fit their
+  content; text-formatting tools expand only when needed.
+- **Familiar typography.** Bundled Google Sans titles and Roboto body text, with
+  smooth native rendering and no app-interface font downloads.
+- **Local-first behavior.** Work offline; local edits and pending sync state
+  survive restarts. Nothing uploads until cloud writes are explicitly enabled.
+- **Guarded two-way sync.** Text, formatting, checklists, colors, Keep pins, and
+  ordering use conflict checks, encrypted recovery copies, and write-pause
+  safeguards. Uncertain writes pause instead of being silently retried.
+- **A quiet tray companion.** Open the dashboard, sync, sign in/out, and manage
+  desktop visibility from the tray. No automatic installer downloads.
 
-## Features
+**Two different pins:** the thumbtack controls Google Keep pinning. The monitor
+controls desktop visibility or local always-on-top behavior; it does not change
+the note's Google Keep pin.
 
-- **One window per note** — drag them anywhere on screen
-- **Remembers positions** — preserves desktop placement and manual sizes; auto-height follows content
-- **Experimental Google Keep sync** — read/import, with guarded writes opt-in only
-- **System tray** — lives quietly in your taskbar tray
-- **Auto-start** — optional "Start with Windows" toggle
-- **Reviewed updates only** — automatic installer downloads disabled
-- **Color-coded** — all 12 Google Keep colors + local dark mode varients
-- **Pin notes** — toggle always-on-top per note
-- **Minimal UI** — frameless, clean, stays out of your way
+## Take a look
 
-## Keep-style dashboard
+All images below are captured from the actual native interface using **fictional
+demo notes and isolated application data**. The displayed sync state is also
+fictional—not a capture of a personal account.
 
-Open **Manage notes** from the tray for the native dark dashboard: searchable
-masonry cards, Pinned/Other sections, grid/list view, note colors, and a separate
-**Desktop pins** view. No website, remote fonts, or linked images are loaded.
-The **Keep Desktop** header and system tray use Google's original Keep logo,
-bundled locally; the app retains its distinct K icon in the taskbar. Google Keep and its logo
-are Google's trademarks. This unofficial app is not affiliated with or endorsed
-by Google. Asset provenance is recorded in `keep_brand.py`.
+### Everything in one place
 
-- Click a card to open an **in-app editor popup**, not another window. Clicking
-  outside, clicking the logo, **Close**, or Escape saves locally and returns to
-  Notes. **Cancel** confirms before discarding changes. A storage failure or
-  conflicting newer edit keeps the popup/draft open rather than losing work.
-- Click the **Keep Desktop** logo/title to return to all Notes and clear search.
-  An unchanged popup closes without creating a phantom edit or empty new note.
-- **Take a note…** and the checklist button create drafts without opening a
-  floating window. Empty untouched drafts do not create notes.
-- **Thumbtack** changes Keep pinning/order. **Monitor** opens an always-on-top
-  desktop note; clicking it again hides that window without changing Keep's pin.
-  With cloud writes off, thumbtack changes remain local and a notice says so.
-  Enabling writes in the tray opts into uploading **all pending edits**, not
-  just pins. Pin-only uploads use guarded metadata writes, not body rewrites.
-- Color display uses local dark equivalents without changing cloud note colors.
-  Explicit color selection is a normal edit, still subject to cloud-write opt-in.
-- Popups match the card's dark color and fit their content: short notes stay
-  compact, growing notes expand up to the app's available height and then scroll.
-  Desktop notes also auto-fit height without changing their width/placement.
-  Manually dragging a top/bottom/corner resize handle keeps that height; turn
-  **Fit height to content** back on from the desktop note's More/context menu.
-- Floating notes share the dashboard's flat card colors, border and vector icons.
-  Titles wrap when reading (click to edit). Use the top grip to drag, the monitor
-  to toggle local always-on-top, and **×** to hide without deleting. The compact
-  footer holds text formatting, the color palette, and More; formatting starts
-  collapsed and background sync preserves your open/closed choice. Checklist
-  notes hide text-formatting controls. More does not offer note-type conversion.
-- Default card/editor/floating-note text is larger. Google Sans titles and Roboto
-  bodies/controls use smooth grayscale antialiasing without forced full pixel-grid
-  hinting. The original OFL-licensed fonts and notices are bundled locally, not
-  installed system-wide or downloaded at runtime. See `assets/fonts/README.md`.
-- More actions include reorder, delete (with confirmation), and type conversion
-  for local notes only. Failed/blocked deletes leave the card present.
+![Searchable dark dashboard with fictional notes](docs/images/dashboard.png)
 
-Archive and Trash browsing, label editing, attachments, and reminders are **not
-implemented**. Archive/Trash navigation is disabled; any labels already in the
-local note model can be viewed/filtered but are not a claim of label sync support.
-Account and cloud-write controls remain in the tray menu. The dashboard does not
-enable writes or change remembered-login security.
+### Edit without leaving the dashboard
 
-## Connecting Google Keep
+![Embedded editor with a card-colored surface](docs/images/editor.png)
 
-1. On first open, the compact sign-in prompt appears automatically. It also
-   returns after a cancelled/failed sign-in. **Use offline** explicitly skips
-   future prompts; sign in later from the tray. Remembered sign-in reconnects
-   automatically when still valid.
-2. Select **Remember on this PC (powerful master token, encrypted)**, then click
-   **Continue to Google**. Enter your email only on Google's sign-in page.
-   The checkbox is the only storage confirmation. The compact window expands
-   only after Continue; optional explanation is under **Security details**.
-   Choose Cancel to stay offline; there is no session-only desktop option.
-   The app requires Google to return the account identity; it does not scrape
-   the sign-in form or fall back to a separately entered email.
-3. Verify the displayed address starts with `https://accounts.google.com`.
-   Complete Google's password/2FA prompts yourself. If Google blocks the embedded
-   browser, stop—this app offers no security-warning bypass.
-4. On success, the window closes and notes sync into the manager. Cloud writes
-   default to OFF. A new explicit two-way-sync opt-in persists only for the same
-   account; older session-only write flags do not silently become persistent.
-   Review/back up queued edits before opting in. Uncertain writes still pause.
-   The manager opens after the first verified download, so you can choose which
-   Google notes appear as desktop windows. Later background syncs do not reopen it.
+Click outside, use **Close**, press Escape, or select the header to save locally
+and return to Notes. Storage errors and conflicting newer edits keep your draft
+open rather than silently losing it.
 
-This is **not** a Google-approved public OAuth integration. After checkbox consent,
-the master token is saved with Windows DPAPI in
-`%APPDATA%\KeepDesktop\keep_token.dat` and reused on later starts. Keep access
-tokens are renewed as needed. This continues until local sign-out or Google's
-rejection/revocation, not for a guaranteed number of days. The previous
-session-only duration cap is not used by the desktop login.
+### Keep a few notes close
 
-Other software running as your Windows user can access the saved credential. Python
-cannot guarantee forensic erasure of transient strings from memory.
-Legacy credential-manager copies are cleaned up on sign-out. CLI cookie
-capture and bearer-printing commands are disabled. Revoke the device/session from
-[Google Account → Security → Your devices](https://myaccount.google.com/device-activity)
-if needed. Signing out locally does not revoke Google's server-side token.
+![Floating text and checklist notes](docs/images/floating-notes.png)
 
-If sign-in fails, `login-validation.json` records only fixed failure categories,
-HTTP status, known Google error codes and safe request metadata. It contains no
-email, password, cookies, tokens, note text or full URLs. Background resource
-blocks appear under Security details rather than as a red login failure.
-Google sign-in and read access were verified in a manual test. The final-page
-import fix in private.6 passed a fresh app read/decode check and the user confirmed
-notes appeared. Live cloud writes remain unverified. A separate browser shutdown
-hang remains under investigation.
+Drag the grip above a title. Use the monitor to toggle always-on-top, the palette
+to change color, and **×** to hide. Drag an edge or corner to resize; **More → Fit
+height to content** restores automatic height. Hide and Delete are separate
+actions, and deletion uses the existing confirmation and guarded sync path.
 
-## Usage
+## Install
 
-| Action | How |
-|---|---|
-| **New note** | Right-click tray → "New note" |
-| **Move a note** | Drag the grip above the title |
-| **Edit title** | Click the title text |
-| **Resize** | Drag an edge or corner; vertical resizing keeps your chosen height |
-| **Change color** | Click the palette in the footer |
-| **Pin on top** | Click the monitor beside the title (desktop only) |
-| **Hide a note** | Click ✕ (note is hidden, not deleted) |
-| **Delete a note** | Floating-note footer → More → "Delete note" |
-| **Manage notes** | Double-click tray icon |
-| **Sync now** | Right-click tray → "Sync now" |
-| **Enable cloud changes** | Tray → "Two-way Google Keep sync (text, pins, checklists)" (opt-in) |
-| **Choose conflicting version** | Tray → "Resolve sync conflicts…" |
-| **Recover older text** | Tray → "View saved recovery copies…" |
-| **Auto-start** | Right-click tray → "Start with Windows" |
+**Windows 10/11, x64.**
 
-## Building from Source
-
-### Run from Python
+1. Open the [latest release](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases/latest).
+2. Download `Google-Keep-Notes-for-Desktop-Setup-<version>.exe` and its `.sha256`
+   file. Compare the hash and review the linked VirusTotal reports.
+3. When upgrading, let sync finish, save edits, and use **tray → Quit** first.
+4. Run the setup EXE. Installation is per-user; startup with Windows is optional.
 
 ```powershell
+Get-FileHash .\Google-Keep-Notes-for-Desktop-Setup-2.3.0.exe -Algorithm SHA256
+```
+
+Release assets include exact-byte hashes, dependency-audit and packaging reports,
+and the available antivirus results. Read [how releases are verified](docs/RELEASES.md).
+Do not disable antivirus or dismiss a detection simply because this project
+expects its binary to be safe. Inspect the evidence and report concerns.
+
+For upgrade compatibility, the executable, shortcuts, installation folder, and
+application-data folder still use the internal name **KeepDesktop**. A branding
+change does not migrate or reset your saved notes, credentials, or sync consent.
+
+## Start offline—or connect Google Keep
+
+Choose **Use offline** to start without connecting an account. Sign in later
+from the tray if you want Google Keep integration.
+
+To connect:
+
+1. Read the sign-in prompt and explicitly select **Remember on this PC**.
+2. Continue to Google's page. Verify the visible HTTPS address is
+   `accounts.google.com`; enter your email, password, and 2FA **only there**.
+3. After a successful read, choose which notes should appear on the desktop.
+4. Cloud writes start **OFF**. Back up your Google notes first, then explicitly
+   enable **Two-way Google Keep sync (text, pins, checklists)** from the tray.
+
+**Enabling writes includes all queued local edits**, not just the note currently
+open. Consent persists for the same account. Sign-out, account mismatch, failed
+reads, conflicts, or uncertain writes retain their fail-safe behavior.
+
+### What remembered sign-in means
+
+The app stores a powerful Google master token protected by Windows DPAPI for
+your Windows user. Other software running as that same user can potentially
+access it. There is no session-only desktop sign-in mode or fixed token-expiry
+promise. Sign-out clears local credentials, but does not itself revoke Google's
+server-side session; use Google Account security controls to revoke it.
+
+## Privacy and safety, without the marketing shortcuts
+
+- Credentials, note cache, and recovery data use per-user Windows encryption and
+  atomic saves. App data is stored under `%APPDATA%\KeepDesktop\`.
+- Runtime networking is restricted by application policy to reviewed Google
+  destinations. No telemetry endpoint or automatic binary updater is enabled.
+- Notes do not fetch linked images/resources or open external links. Google
+  sign-in has a visible origin and rejects certificate errors and unapproved
+  navigation; there is no TLS/sandbox bypass.
+- Conflicts preserve both versions. Use **Resolve sync conflicts…** or **View
+  saved recovery copies…** from the tray rather than overwriting uncertain state.
+- A completed read and “writes enabled” status do **not** prove that every queued
+  upload succeeded. Antivirus and dependency scans do **not** certify the app.
+
+These are application-level controls—not an OS firewall, a Google endorsement,
+or protection from software already running as your Windows user.
+Read [SECURITY.md](SECURITY.md) and the [login review](security/LOGIN-REVIEW.md)
+before entrusting important notes or credentials to the app.
+
+## Current limits
+
+| Area | Status |
+| --- | --- |
+| Text, titles, formatting, colors, checklists, Keep pins/order | Guarded experimental sync; opt-in writes |
+| Desktop placement, visibility, always-on-top | Local to this PC |
+| Archive/Trash browsing | Not implemented; navigation disabled |
+| Label editing, attachments, reminders | Not implemented |
+| Existing remote note-type conversion | Blocked; use the official Keep app |
+| Automatic updates and code signing | Not available |
+| macOS/Linux | Not supported by this Windows/DPAPI implementation |
+
+Google can change its internal API without notice. A separate WebEngine shutdown
+hang after sign-in remains under investigation. Sign-in/read access has been
+manually verified, but live cloud-write correctness has not been comprehensively
+verified. Do not rely on this as the only copy of important notes.
+
+## Develop
+
+Use **Python 3.13 on Windows**. No real Google account is needed for offline tests
+or README renders.
+
+```powershell
+git clone https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop.git
+cd Google-Keep-Notes-for-Desktop
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.lock
+.\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: -r requirements.lock
 .\.venv\Scripts\python.exe main.py
 ```
 
-### Build the Windows installer
-
-Requires [Inno Setup 6](https://jrsoftware.org/isdl.php) on your `PATH`.
+### Test and render
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: -r requirements.lock
-.\.venv\Scripts\python.exe -m pip install pyinstaller==6.22.3 pip-audit==2.10.1
-.\.venv\Scripts\python.exe -m PyInstaller KeepDesktop.spec
-mkdir Output -ErrorAction SilentlyContinue
-.\.venv\Scripts\python.exe -m pip_audit --local --format json --output Output/security-build-audit.json
-.\.venv\Scripts\python.exe tools/verify_frozen_security.py build/KeepDesktop/Analysis-00.toc | Out-File Output/security-frozen-inventory.json -Encoding utf8
-ISCC.exe installer.iss
+$env:QT_QPA_PLATFORM = 'offscreen'
+.\.venv\Scripts\python.exe -m pytest tests -q
+.\.venv\Scripts\python.exe tools\render_project.py --output docs\images
 ```
 
-The installer is written to `Output\KeepDesktop-Setup-<version>.exe`.
+Tests use temporary app data and block live `requests` traffic. The image renderer
+creates native widgets directly with fictional notes; it never starts a sync
+controller or reads the installed account's note cache.
 
-GitHub Actions does this automatically on every `v*` tag — see `.github/workflows/release.yml`.
+### Build a setup EXE
 
-## How It Works
+Use the [Build & Release workflow](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/actions/workflows/release.yml)
+with an explicit version. It runs tests and a dependency audit, builds with
+PyInstaller/Inno Setup, verifies frozen security modules and bundled font assets,
+and uploads build artifacts. **It does not automatically publish a release.**
+Publication happens only after review of the exact installer bytes and antivirus
+results. Local build and publication instructions are in [docs/RELEASES.md](docs/RELEASES.md).
 
-- Config, positions, notes cache, and the auth token live in `%APPDATA%\KeepDesktop\`
-- Sync talks directly to Google Keep's internal
-  `notes-pa.clients6.google.com/notes/v1/changes` endpoint via
-  `keep_protocol/`
-- Auth uses a small endpoint-locked transport derived from the documented
-  gpsoauth protocol. The legacy gpsoauth/gkeepapi code remains for historical
-  tests only and is explicitly excluded from the packaged desktop app.
-- Offline edits, dirty flags and their confirmed sync baselines survive restarts
-- Local notes sync only after cloud writes are explicitly enabled
-- Changing an existing note between text/checklist is deliberately blocked;
-  do that in the official Keep app instead
+### Source map
 
-## Files
+| Component | Location |
+| --- | --- |
+| Dashboard and embedded editor | `note_manager.py`, `dashboard_theme.py` |
+| Floating desktop notes | `note_window.py`, `content_sizing.py` |
+| Tray, lifecycle, sync orchestration | `app_controller.py` |
+| Keep protocol and sync | `keep_protocol/`, `keep_sync_v2.py` |
+| Consent, conflicts, recovery, write pauses | `hardened_sync.py`, `sync_merge.py` |
+| Sign-in and destination policy | `login_security.py`, `network_policy.py` |
+| Windows encrypted storage | `secure_storage.py` |
+| Fonts and branding provenance | `ui_typography.py`, `keep_brand.py`, `assets/fonts/` |
 
-| File | Purpose |
-|---|---|
-| `main.py` | Entry point |
-| `app_controller.py` | Tray icon, note lifecycle, sync orchestration |
-| `note_window.py` | Individual sticky-note window (frameless Qt widget) |
-| `keep_protocol/` | First-party Keep `/notes/v1/changes` client (auth, encode, decode, models) |
-| `keep_sync_v2.py` | High-level sync engine on top of `keep_protocol` |
-| `hardened_sync.py` | Write opt-in, conflict policy, recovery and pause journal |
-| `secure_storage.py` | Windows DPAPI encryption and atomic file replacement |
-| `keep_sync.py` | Legacy compatibility shim (KeepNote dataclass + colour maps) |
-| `sync_merge.py` | Three-way local/remote merge decisions |
-| `updater.py` | No-network compatibility stub; runtime updater removed |
-| `config.py` | Settings, positions, autostart, paths, version |
-| `KeepDesktop.spec` | PyInstaller build spec |
-| `installer.iss` | Inno Setup installer script |
+## Contribute
 
-## License
+[Open an issue](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/issues)
+or a pull request in **this repository**. Include the version, Windows version,
+reproduction steps, and fictional examples where possible. Do not post tokens,
+cookies, personal notes, or unredacted account logs. See [SECURITY.md](SECURITY.md)
+for security concerns.
 
-Google Keep Notes for Desktop is licensed under the
-**GNU Affero General Public License v3.0** (AGPL-3.0).
+## Credits and license
 
-This means:
+Maintained by [TylerBuza](https://github.com/TylerBuza). Built on
+[Keep-Desktop by LukeCGG](https://github.com/LukeCGG/Keep-Desktop) and its
+contributors; original history, notices, and author credit are retained.
+This is its own standalone repository, not a claim that all code was written
+from scratch. See [CREDITS.md](CREDITS.md).
 
-- You may use, copy, modify, and redistribute it freely.
-- You may run it for any purpose, personal or internal-business.
-- If you distribute it, modified or not, the **complete corresponding source code** must be made available under the same AGPL-3.0 license.
-- If you run a modified version on a network server that users interact with, you must offer them the modified source code.
-- A different project name or GitHub repository does not remove the AGPL-3.0
-  obligations or the original author's copyright notices. Redistribution must
-  remain compliant with that license, not closed-source/proprietary.
+Application source is licensed under **[AGPL-3.0](LICENSE)**. Distribution and
+covered network use must comply with that license, including applicable source
+availability requirements. Bundled Google Sans/Roboto fonts have their own OFL
+license and notices. Google Keep and its logo are Google's trademarks.
 
-See [LICENSE](LICENSE) for the full legal text and [CREDITS.md](CREDITS.md) for
-upstream and third-party attribution.
-
-## Contributing
-
-Development, issues, and pull requests for this project belong at
-<https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop> (access is limited to
-authorized collaborators while the repository is private). Please do not send
-issues specific to this project's changes to the original author's repository.
-
-## Disclaimer
-
-Google Keep Notes for Desktop uses an **unofficial** Google Keep API. Google may change or break this at any time. Use at your own risk; do not rely on this for mission-critical data. Google Keep and its logo are Google's trademarks. The project is not affiliated with or endorsed by Google.
+**Not affiliated with, endorsed by, or supported by Google.**

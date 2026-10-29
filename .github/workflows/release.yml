@@ -7,12 +7,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Private installer version (for example 2.2.0-private.1)'
+        description: 'Installer version (for example 2.3.0)'
         required: true
-        default: '2.2.0-private.11'
+        default: '2.3.0'
 
 permissions:
-  contents: write   # required to create the GitHub Release
+  contents: read   # Publication is manual, after exact-byte antivirus review.
 
 jobs:
   build:
@@ -72,7 +72,7 @@ jobs:
           $tag = $env:BUILD_REF
           if ($env:PRIVATE_VERSION) { $v = $env:PRIVATE_VERSION }
           elseif ($tag -match '^v(.+)$') { $v = $Matches[1] }
-          else { throw 'Supply a private version when building from a branch.' }
+          else { throw 'Supply an installer version when building from a branch.' }
           if ($v -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw 'Invalid build version.' }
           $numeric = ($v -split '-')[0]
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -137,26 +137,28 @@ jobs:
       - name: Write installer SHA256
         shell: pwsh
         run: |
-          Get-ChildItem 'Output\KeepDesktop-Setup-*.exe' | ForEach-Object {
+          Get-ChildItem 'Output\Google-Keep-Notes-for-Desktop-Setup-*.exe' | ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)" | Set-Content -Path ($_.FullName + '.sha256') -Encoding ascii
           }
+
+      - name: Include packaged executable for antivirus review
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path Output/scan-inputs -Force | Out-Null
+          Copy-Item dist/KeepDesktop/KeepDesktop.exe Output/scan-inputs/KeepDesktop.exe
+          $hash = (Get-FileHash Output/scan-inputs/KeepDesktop.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  KeepDesktop.exe" | Set-Content Output/scan-inputs/KeepDesktop.exe.sha256 -Encoding ascii
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: KeepDesktop-Setup
           path: |
-            Output\KeepDesktop-Setup-*.exe
-            Output\KeepDesktop-Setup-*.exe.sha256
+            Output\Google-Keep-Notes-for-Desktop-Setup-*.exe
+            Output\Google-Keep-Notes-for-Desktop-Setup-*.exe.sha256
             Output\security-build-audit.json
             Output\security-frozen-inventory.json
             Output\security-fonts.json
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: KeepDesktop ${{ steps.ver.outputs.version }}
-          generate_release_notes: true
-          files: Output\KeepDesktop-Setup-*.exe
+            Output\scan-inputs\KeepDesktop.exe
+            Output\scan-inputs\KeepDesktop.exe.sha256
