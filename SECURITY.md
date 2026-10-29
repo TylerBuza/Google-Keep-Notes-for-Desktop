@@ -346,7 +346,7 @@ reports and available exact-binary antivirus results are published through this
 project's GitHub releases. Builds do not automatically publish themselves; see
 `docs/RELEASES.md`. Antivirus results are not a safety guarantee, and unsigned
 binaries may trigger warnings or detections that require investigation. Release
-tooling may contact VirusTotal; the installed application does not gain any
+tooling may contact antivirus-analysis services; the installed application does not gain any
 non-Google runtime destination or antivirus credential. See
 `security/PUBLICATION-REVIEW.md` for the scope and findings of the pre-publication
 source/history review.

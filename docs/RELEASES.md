@@ -2,6 +2,9 @@
 
 ## For users
 
+The current 2.3.0 setup is held as an unpublished draft pending review of
+antivirus findings. No clean-binary claim is made.
+
 Download only from this project's
 [GitHub releases](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases).
 The Windows x64 setup EXE is named
@@ -23,7 +26,7 @@ Each reviewed public release includes:
 
 Check hashes with `Get-FileHash <installer> -Algorithm SHA256`. A hash identifies
 bytes; it is not a digital signature or proof of safety. The app is currently
-unsigned. VirusTotal results are a snapshot from multiple engines, not a
+unsigned. Antivirus results are a snapshot from multiple engines, not a
 certification; no detection should be dismissed automatically as a false positive.
 No scan result is invented or carried over from a differently hashed build.
 
@@ -70,10 +73,10 @@ before freezing rather than shipping the development sentinel `0.0.0`.
    UI tests. Render README images only from fictional, isolated data.
 3. Download the successful build's artifact. Verify its source SHA, version,
    installer/application hashes, dependency audit, frozen inventory and fonts.
-4. Scan the **exact final installer** and **packaged application EXE** with
-   VirusTotal. Public VirusTotal uploads share the submitted binaries with the
-   security community. Never upload credentials, personal notes, or app-data
-   directories. Use an authenticated API key or the official upload interface;
+4. Review the **exact final installer** and **packaged application EXE** with
+   multiple antivirus engines. Public analysis services may share submitted
+   binaries with the security community. Never upload credentials, personal
+   notes, or app-data directories. Use an authenticated API or official interface;
    do not bypass an access challenge. Any API key stays outside Git and logs.
 5. Wait for the analyses, record totals, detections and permanent report links
    beside the SHA256. Inspect actual findings; stop to investigate rather than
@@ -88,23 +91,8 @@ before freezing rather than shipping the development sentinel `0.0.0`.
 8. Never replace a published asset with different bytes under the same version
    and scan claim. Rebuilds get a new version and fresh hashes/analyses.
 
-Maintainer antivirus tools are release-time tooling only. No VirusTotal traffic
-or API credential is added to the installed app's Google-only runtime networking.
-
-### API-based scans
-
-`tools/scan_release_virustotal.py` uses the official VirusTotal API and a
-process-local `VT_API_KEY`. Keep that key outside Git, shell history, screenshots,
-and release assets. Do not pass it as a command-line argument. The tool verifies
-both checksum sidecars before uploading, uses the large-file endpoint when
-needed, limits request frequency, and waits for completed exact-hash analyses.
-
-```powershell
-# Supply VT_API_KEY securely in this process before running; never commit it.
-.\.venv\Scripts\python.exe tools/scan_release_virustotal.py <artifact-directory> --version 2.3.0 --source-commit <exact-40-character-sha> --output <report-directory>
-```
-
-It writes `virustotal-installer.json` and `virustotal-application.json`, including
-engine totals, any detections, and permanent hash-based report links. Exit code
-2 means detections were reported, not that they were dismissed; exit code 1
-means verification did not complete. Neither is an automatic publication pass.
+Maintainer antivirus tools are release-time tooling only. No third-party analysis
+traffic or API credential is added to the installed app's Google-only runtime
+networking. Keep any analysis-service credentials outside Git, shell history,
+screenshots, and release assets. A pending, failed, or detected analysis is not
+an automatic publication pass.
