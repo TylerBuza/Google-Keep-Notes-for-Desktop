@@ -12,7 +12,7 @@ APP_NAME = "KeepDesktop"
 # source — do NOT bump manually for releases. Runtime update networking is removed.
 APP_VERSION = "0.0.0"
 # Source attribution only; never used for runtime HTTP requests.
-GITHUB_REPO = "TylerBuza/Keep-Desktop"
+GITHUB_REPO = "TylerBuza/Google-Keep-Notes-for-Desktop"
 # Private builds must never install unsigned upstream binaries over our fixes.
 AUTO_UPDATE_ENABLED = False
 APP_DIR = os.path.dirname(os.path.abspath(__file__))

@@ -10,8 +10,8 @@
 #endif
 
 #define MyAppName        "KeepDesktop"
-#define MyAppPublisher   "TylerBuza (private build; upstream LukeCGG)"
-#define MyAppURL         "https://github.com/TylerBuza/Keep-Desktop"
+#define MyAppPublisher   "TylerBuza"
+#define MyAppURL         "https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop"
 #define MyAppExeName     "KeepDesktop.exe"
 
 #ifndef MyAppNumericVersion
@@ -59,6 +59,7 @@ Name: "startup";     Description: "Start {#MyAppName} when Windows starts"; Grou
 Source: "dist\KeepDesktop\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "LICENSE";            DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md";          DestDir: "{app}"; Flags: ignoreversion
+Source: "CREDITS.md";         DestDir: "{app}"; Flags: ignoreversion
 Source: "SECURITY.md";        DestDir: "{app}"; Flags: ignoreversion
 Source: "security\LOGIN-REVIEW.md"; DestDir: "{app}\security"; Flags: ignoreversion
 Source: "security\dependency-audit.json"; DestDir: "{app}\security"; Flags: ignoreversion

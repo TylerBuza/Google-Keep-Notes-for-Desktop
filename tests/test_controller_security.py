@@ -176,7 +176,8 @@ def test_failed_recovery_blocks_incoming_overwrite_and_retains_old_baseline(tmp_
 def test_private_installer_is_per_user_and_does_not_auto_launch_silently():
     from pathlib import Path
     script = (Path(__file__).resolve().parents[1] / "installer.iss").read_text(encoding="utf-8")
-    assert 'https://github.com/TylerBuza/Keep-Desktop' in script
+    assert 'https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop' in script
+    assert 'Source: "CREDITS.md";' in script
     assert 'DefaultDirName={localappdata}\\Programs\\{#MyAppName}' in script
     assert 'PrivilegesRequired=lowest' in script
     assert 'PrivilegesRequiredOverridesAllowed=' not in script

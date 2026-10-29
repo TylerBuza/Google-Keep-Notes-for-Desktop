@@ -1,15 +1,20 @@
-# KeepDesktop
+# Google Keep Notes for Desktop
 
-**Google Keep as floating sticky notes on your Windows desktop.** Each note gets its own draggable window — just like Windows Sticky Notes, but synced with Google Keep.
+**An unofficial Google Keep client for Windows**, with a native Keep-style
+dashboard, floating desktop notes, and guarded two-way sync.
 
 ![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)
 
-## Private security-hardened copy
+Maintained by [TylerBuza](https://github.com/TylerBuza) in the private, standalone
+[Google-Keep-Notes-for-Desktop](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop)
+repository. This project has its own development and releases; it is not a
+GitHub fork or an official Google product.
 
-Derived from [LukeCGG/Keep-Desktop](https://github.com/LukeCGG/Keep-Desktop),
-upstream commit `60a70ffee9bed33fbc1aa373203a89a03df7dc3f` (v2.2.0).
-Original history, attribution and AGPL-3.0 license are retained. This is a
-private standalone repository because GitHub public forks cannot be private.
+Built on [LukeCGG's Keep-Desktop](https://github.com/LukeCGG/Keep-Desktop).
+Original code, history, author credit, and the AGPL-3.0 license are retained.
+See [CREDITS.md](CREDITS.md) for provenance and third-party notices.
+
+## Privacy and sync safeguards
 
 - **Remembered Google sign-in:** the requested desktop mode saves a powerful
   master token with Windows encryption after checkbox consent. It
@@ -43,13 +48,19 @@ private standalone repository because GitHub public forks cannot be private.
   Notes cannot fetch linked resources or launch external links. This is an
   app-level restriction, not an OS firewall or protection from compromised software.
 
-Google’s internal API is **still unofficial**. It cannot be made supported
-by a fork. See [SECURITY.md](SECURITY.md) for limits and recovery guidance.
+Google’s internal API is **still unofficial**. This is not an officially
+supported integration. See [SECURITY.md](SECURITY.md) for limits and recovery guidance.
 
 ## Download & Install
 
-Run this copy from source using the commands below. Upstream installers do
-**not** include these security changes. No installer has been security-certified.
+Private installers are built from this repository's GitHub Actions workflow;
+run from source using the commands below if preferred. Installers from the
+original project do **not** include this project's changes. No installer has
+been security-certified.
+
+The executable, install folder, and application-data folder retain the internal
+name `KeepDesktop` for compatibility with existing installations and saved notes.
+The repository's name does not change credentials, note storage, or sync consent.
 
 ## Features
 
@@ -163,13 +174,13 @@ hang remains under investigation.
 | Action | How |
 |---|---|
 | **New note** | Right-click tray → "New note" |
-| **Move a note** | Drag the handle (≡) on the title bar |
+| **Move a note** | Drag the grip above the title |
 | **Edit title** | Click the title text |
-| **Resize** | Drag the bottom-right corner grip |
-| **Change color** | Click 🎨 on the title bar |
-| **Pin on top** | Click 📌 on the title bar |
+| **Resize** | Drag an edge or corner; vertical resizing keeps your chosen height |
+| **Change color** | Click the palette in the footer |
+| **Pin on top** | Click the monitor beside the title (desktop only) |
 | **Hide a note** | Click ✕ (note is hidden, not deleted) |
-| **Delete a note** | Right-click the note body → "Delete note" |
+| **Delete a note** | Floating-note footer → More → "Delete note" |
 | **Manage notes** | Double-click tray icon |
 | **Sync now** | Right-click tray → "Sync now" |
 | **Enable cloud changes** | Tray → "Two-way Google Keep sync (text, pins, checklists)" (opt-in) |
@@ -239,7 +250,8 @@ GitHub Actions does this automatically on every `v*` tag — see `.github/workfl
 
 ## License
 
-KeepDesktop is licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0).
+Google Keep Notes for Desktop is licensed under the
+**GNU Affero General Public License v3.0** (AGPL-3.0).
 
 This means:
 
@@ -247,14 +259,20 @@ This means:
 - You may run it for any purpose, personal or internal-business.
 - If you distribute it, modified or not, the **complete corresponding source code** must be made available under the same AGPL-3.0 license.
 - If you run a modified version on a network server that users interact with, you must offer them the modified source code.
-- You **may not** rebrand it, repackage it, or sell it as a closed-source / proprietary product.
+- A different project name or GitHub repository does not remove the AGPL-3.0
+  obligations or the original author's copyright notices. Redistribution must
+  remain compliant with that license, not closed-source/proprietary.
 
-See [LICENSE](LICENSE) for the full legal text.
+See [LICENSE](LICENSE) for the full legal text and [CREDITS.md](CREDITS.md) for
+upstream and third-party attribution.
 
 ## Contributing
 
-Issues and pull requests welcome at <https://github.com/LukeCGG/Keep-Desktop>.
+Development, issues, and pull requests for this project belong at
+<https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop> (access is limited to
+authorized collaborators while the repository is private). Please do not send
+issues specific to this project's changes to the original author's repository.
 
 ## Disclaimer
 
-KeepDesktop uses an **unofficial** Google Keep API. Google may change or break this at any time. Use at your own risk; do not rely on this for mission-critical data. The project is not affiliated with or endorsed by Google.
+Google Keep Notes for Desktop uses an **unofficial** Google Keep API. Google may change or break this at any time. Use at your own risk; do not rely on this for mission-critical data. Google Keep and its logo are Google's trademarks. The project is not affiliated with or endorsed by Google.

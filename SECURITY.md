@@ -332,7 +332,10 @@ tests protect only dummy data in temporary files.
 
 ## License and upstream
 
-This is a private standalone copy of LukeCGG/Keep-Desktop, retaining the
-complete upstream Git history and AGPL-3.0 license. Private personal use does
-not require publishing the repository. Distribution or covered network use
-of modified versions must comply with AGPL-3.0; see LICENSE.
+Google Keep Notes for Desktop is maintained by TylerBuza in a private standalone
+repository, not a GitHub fork. It is based on LukeCGG/Keep-Desktop, retaining the
+complete upstream Git history, attribution, and AGPL-3.0 license; see CREDITS.md.
+Private personal use does not require publishing the repository. Distribution
+or covered network use of modified versions must comply with AGPL-3.0; see
+LICENSE. Repository branding does not change storage paths, sign-in consent,
+cloud-write authorization, or any network restriction.
