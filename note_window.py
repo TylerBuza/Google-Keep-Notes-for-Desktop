@@ -4,19 +4,20 @@ from PySide6.QtCore import Qt, Signal, QPoint, QSize, QEvent, QPropertyAnimation
 from PySide6.QtGui import (
     QFont, QColor, QCursor, QPainter, QPen,
     QTextCharFormat, QTextBlockFormat, QTextCursor, QAction,
-    QSyntaxHighlighter, QPainterPath, QBrush,
+    QSyntaxHighlighter, QPainterPath, QBrush, QPalette,
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLabel, QLineEdit,
     QPushButton, QMenu, QGraphicsDropShadowEffect,
     QGridLayout, QToolButton, QCheckBox, QScrollArea, QFrame,
-    QStyleOptionButton, QStyle, QApplication,
+    QStyleOptionButton, QStyleOptionFrame, QStyle, QApplication, QSizePolicy,
 )
 
 from keep_protocol.nested_model import u16_len
 from native_resources import LocalNoteDocument
 from ui_typography import BODY_FAMILY, crisp_font
 from content_sizing import body_height, chrome_height
+from dashboard_theme import icon as interface_icon, card_color, ACCENT, BORDER, FOREGROUND, MUTED
 from config import (
     KEEP_COLORS, KEEP_COLORS_DARK, DEFAULT_WIDTH, DEFAULT_HEIGHT,
     MIN_WIDTH, MIN_HEIGHT, set_position, get_position,
@@ -36,7 +37,7 @@ BASE_BODY_PT = 12.0
 BASE_H1_PT = 20.0
 BASE_H2_PT = 16.0
 BASE_TOOLBAR_BTN_PT = 10.0
-BASE_TITLE_PT = 12.0
+BASE_TITLE_PT = 15.0
 BASE_TITLEBAR_BTN_PX = 14
 BASE_CHECKLIST_PT = 12.0
 BASE_CHARCOUNT_PX = 11
@@ -69,6 +70,15 @@ _LIGHT_MENU_QSS = (
     "QMenu::item:selected { background: #e0e0e0; color: #000; }"
     "QMenu::item:disabled { color: #aaa; }"
     "QMenu::separator { height: 1px; background: #ddd; margin: 4px 6px; }"
+)
+
+_DARK_MENU_QSS = (
+    "QMenu { background: #303134; color: #e8eaed; border: 1px solid #5f6368;"
+    "        border-radius: 6px; padding: 5px; }"
+    "QMenu::item { padding: 8px 18px; color: #e8eaed; }"
+    "QMenu::item:selected { background: #454649; }"
+    "QMenu::item:disabled { color: #6e7074; }"
+    "QMenu::separator { height: 1px; background: #5f6368; margin: 4px; }"
 )
 
 
@@ -205,7 +215,8 @@ class ColorPickerPopup(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        self.setStyleSheet("background: #3C4043; border-radius: 8px;")
+        self.setObjectName("noteColorPicker")
+        self.setStyleSheet("QWidget#noteColorPicker { background: #303134; border: 1px solid #5f6368; border-radius: 8px; }")
 
         layout = QGridLayout(self)
         layout.setSpacing(6)
@@ -259,6 +270,7 @@ class FormattingToolbar(QWidget):
 
     def __init__(self, text_edit, color_hex="#FFF475", parent=None):
         super().__init__(parent)
+        self.setObjectName("noteFormattingToolbar")
         self._text_edit = text_edit
         self._dark = False
         self.setFixedHeight(28)
@@ -488,8 +500,7 @@ class FormattingToolbar(QWidget):
         self.heading_btn.setText({1: "H1", 2: "H2"}.get(level, "\u00b6"))
 
     def update_color(self, color_hex):
-        darker = QColor(color_hex).darker(105).name()
-        self.setStyleSheet(f"FormattingToolbar {{ background: {darker}; }}")
+        self.setStyleSheet("QWidget#noteFormattingToolbar { background: transparent; }")
         self._restyle_buttons()
 
     def set_dark(self, dark: bool):
@@ -521,6 +532,7 @@ class FormattingToolbar(QWidget):
             f"QToolButton:hover {{ background: {hover}; }}"
             "QToolButton::menu-indicator { image: none; width: 0; }"
         )
+        self.heading_btn.menu().setStyleSheet(_DARK_MENU_QSS if self._dark else _LIGHT_MENU_QSS)
 
 
 # ── Title Bar ──────────────────────────────────────────────────────────
@@ -603,17 +615,16 @@ class DragHandle(QWidget):
 
 
 class TitleDragSliver(DragHandle):
-    """Thin full-width strip just below the title bar, giving the user
-    an extra, more visible drag surface — the title bar itself is mostly
-    consumed by the editable title field and the pin/colour/close
-    buttons, leaving little room to grab. Reuses DragHandle's mouse
+    """Subtle full-width grip above the title, away from editable text.
+
+    Reuses DragHandle's mouse
     logic (native-drag attempt, manual move + snap preview) as-is; only
     the size and appearance differ, so this only overrides __init__ and
     paintEvent."""
 
     def __init__(self, parent=None):
         QWidget.__init__(self, parent)
-        self.setFixedHeight(6)
+        self.setFixedHeight(12)
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self.setToolTip("Drag to move note")
         self._drag_pos = None
@@ -621,11 +632,48 @@ class TitleDragSliver(DragHandle):
 
     def paintEvent(self, _event):
         painter = QPainter(self)
-        painter.fillRect(
-            self.rect(),
-            QColor(255, 255, 255, 30) if self._dark else QColor(0, 0, 0, 30),
-        )
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 65) if self._dark else QColor(0, 0, 0, 55))
+        painter.drawRoundedRect(QRect((self.width() - 24) // 2, 5, 24, 3), 1.5, 1.5)
         painter.end()
+
+
+class _NoteTitleEdit(QLineEdit):
+    """Plain-text title: wraps when reading, keeps native line editing on focus."""
+
+    def __init__(self, text):
+        super().__init__(text)
+        self.setMinimumWidth(0)
+        policy = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+        self.setToolTip("Click to edit title")
+        self.textChanged.connect(lambda text: self.updateGeometry())
+
+    def heightForWidth(self, width):
+        metrics = self.fontMetrics()
+        bounds = metrics.boundingRect(QRect(0, 0, max(1, width), 10000),
+            Qt.TextFlag.TextWordWrap, self.text() or self.placeholderText())
+        return min(metrics.lineSpacing() * 3, max(metrics.height(), bounds.height())) + 4
+
+    def minimumSizeHint(self):
+        return QSize(0, self.fontMetrics().height() + 4)
+
+    def paintEvent(self, event):
+        if self.hasFocus():
+            super().paintEvent(event)
+            return
+        painter = QPainter(self)
+        option = QStyleOptionFrame()
+        self.initStyleOption(option)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_PanelLineEdit, option, painter, self)
+        role = QPalette.ColorRole.Text if self.text() else QPalette.ColorRole.PlaceholderText
+        painter.setPen(self.palette().color(role))
+        painter.setFont(self.font())
+        painter.drawText(self.rect().adjusted(0, 2, 0, -2),
+                         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                         self.text() or self.placeholderText())
 
 
 class TitleBar(QWidget):
@@ -640,22 +688,21 @@ class TitleBar(QWidget):
 
     def __init__(self, title="", color_hex="#FFF475", parent=None):
         super().__init__(parent)
-        self.setFixedHeight(32)
+        self.setObjectName("desktopTitleBar")
+        self.setMinimumHeight(40)
+        policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
         self._drag_pos = None
         self._pinned = False
         self._color_hex = color_hex
         self._dark = False
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 0, 4, 0)
+        layout.setContentsMargins(16, 4, 12, 4)
         layout.setSpacing(4)
 
-        # Dedicated drag handle (the title field steals clicks now that
-        # it's editable, so we give the user an explicit grab area).
-        self.drag_handle = DragHandle(self)
-        layout.addWidget(self.drag_handle)
-
-        self.title_edit = QLineEdit(title)
+        self.title_edit = _NoteTitleEdit(title)
         self.title_edit.setPlaceholderText("Title")
         # Show the START of the title when it overflows the available
         # width — default QLineEdit places the cursor at the end after
@@ -672,6 +719,7 @@ class TitleBar(QWidget):
             "                  border-radius: 3px; }"
         )
         self.title_edit.textEdited.connect(self.title_changed.emit)
+        self.title_edit.textChanged.connect(self._title_layout_changed)
         # Backwards-compat alias for code that referred to title_label
         self.title_label = self.title_edit
         layout.addWidget(self.title_edit, stretch=1)
@@ -685,45 +733,57 @@ class TitleBar(QWidget):
             QPushButton:hover { background: rgba(0,0,0,0.1); }
         """
 
-        self.pin_btn = QPushButton("📌")
-        self.pin_btn.setToolTip("Toggle always on top")
+        self.pin_btn = QPushButton()
+        self.pin_btn.setCheckable(True)
+        self.pin_btn.setToolTip("Keep above other windows (desktop only)")
+        self.pin_btn.setAccessibleName("Keep above other windows (desktop only)")
         self.pin_btn.setStyleSheet(btn_style)
-        self.pin_btn.setFixedSize(28, 28)
+        self.pin_btn.setFixedSize(32, 32)
+        self.pin_btn.setIconSize(QSize(20, 20))
+        self.pin_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.pin_btn.clicked.connect(self._toggle_pin)
-        layout.addWidget(self.pin_btn)
+        layout.addWidget(self.pin_btn, 0, Qt.AlignmentFlag.AlignTop)
 
-        self.color_btn = QPushButton("🎨")
+        self.color_btn = QPushButton()
         self.color_btn.setToolTip("Change color")
+        self.color_btn.setAccessibleName("Change note color")
         self.color_btn.setStyleSheet(btn_style)
-        self.color_btn.setFixedSize(28, 28)
+        self.color_btn.setFixedSize(32, 32)
+        self.color_btn.setIconSize(QSize(20, 20))
+        self.color_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.color_btn.clicked.connect(self._show_color_picker)
-        layout.addWidget(self.color_btn)
+        self.color_btn.hide()  # Reparented into the floating note's bottom action row.
 
-        self.close_btn = QPushButton("✕")
+        self.close_btn = QPushButton()
         self.close_btn.setToolTip("Hide note")
+        self.close_btn.setAccessibleName("Hide desktop note")
         self.close_btn.setStyleSheet(btn_style)
-        self.close_btn.setFixedSize(28, 28)
+        self.close_btn.setFixedSize(32, 32)
+        self.close_btn.setIconSize(QSize(20, 20))
+        self.close_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.close_btn.clicked.connect(self.close_clicked.emit)
-        layout.addWidget(self.close_btn)
+        layout.addWidget(self.close_btn, 0, Qt.AlignmentFlag.AlignTop)
 
         self.update_color(color_hex)
 
     def update_color(self, color_hex):
         self._color_hex = color_hex
-        darker = QColor(color_hex).darker(110).name()
-        self.setStyleSheet(f"""
-            TitleBar {{
-                background: {darker};
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
-            }}
-        """)
+        self.setStyleSheet("QWidget#desktopTitleBar { background: transparent; }")
         self._restyle_widgets()
+
+    def heightForWidth(self, width):
+        return max(40, self.layout().totalHeightForWidth(width))
+
+    def _title_layout_changed(self, text):
+        self.layout().invalidate()
+        self.updateGeometry()
+        win = self.window()
+        if hasattr(win, "_schedule_content_fit"):
+            win._schedule_content_fit()
 
     def set_dark(self, dark: bool):
         self._dark = dark
         self._restyle_widgets()
-        self.drag_handle.set_dark(dark)
 
     def set_font_scale(self):
         """Re-apply the current global FONT_SCALE to the title font and
@@ -732,12 +792,13 @@ class TitleBar(QWidget):
             crisp_font(QFont("Google Sans", round(_scaled_pt(BASE_TITLE_PT)), QFont.Weight.Medium), title=True)
         )
         self._restyle_widgets()
+        self._title_layout_changed(self.title_edit.text())
 
     def _restyle_widgets(self):
         if self._dark:
             text_color, hover, focus_bg, btn_color = (
-                "#f1f3f4", "rgba(255,255,255,0.12)",
-                "rgba(255,255,255,0.18)", "#dadce0",
+                FOREGROUND, "rgba(255,255,255,0.08)",
+                "rgba(255,255,255,0.04)", MUTED,
             )
         else:
             text_color, hover, focus_bg, btn_color = (
@@ -752,17 +813,21 @@ class TitleBar(QWidget):
         )
         btn_qss = (
             "QPushButton {"
-            f"  border: none; border-radius: 3px; font-size: {_scaled_px(BASE_TITLEBAR_BTN_PX)}px;"
-            f"  color: {btn_color}; padding: 2px 6px; background: transparent;"
+            f"  border: none; border-radius: 16px; font-size: {_scaled_px(BASE_TITLEBAR_BTN_PX)}px;"
+            f"  color: {btn_color}; padding: 6px; background: transparent;"
             "}"
-            f"QPushButton:hover {{ background: {hover}; }}"
+            f"QPushButton:hover, QPushButton:focus {{ background: {hover}; }}"
         )
         for b in (self.pin_btn, self.color_btn, self.close_btn):
             b.setStyleSheet(btn_qss)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pin_btn.setIcon(interface_icon("desktop", (ACCENT if self._dark else "#1a73e8")
+                                            if self._pinned else btn_color))
+        self.color_btn.setIcon(interface_icon("palette", btn_color))
+        self.close_btn.setIcon(interface_icon("close", btn_color))
 
     def _toggle_pin(self):
-        self._pinned = not self._pinned
-        self.pin_btn.setText("📍" if self._pinned else "📌")
+        self.set_pinned(not self._pinned)
         self.pin_toggled.emit(self._pinned)
 
     def _show_color_picker(self):
@@ -793,7 +858,14 @@ class TitleBar(QWidget):
 
     def set_pinned(self, pinned):
         self._pinned = pinned
-        self.pin_btn.setText("📍" if pinned else "📌")
+        self.pin_btn.setChecked(bool(pinned))
+        self._restyle_widgets()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        win = self.window()
+        if hasattr(win, "_resize_handles"):
+            win._position_resize_handles()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1363,7 +1435,8 @@ class NoteTextEdit(QTextEdit):
     def contextMenuEvent(self, event):
         # Build the standard menu but replace Paste with Paste (plain text).
         menu = self.createStandardContextMenu()
-        menu.setStyleSheet(_LIGHT_MENU_QSS)
+        dark = self.palette().color(QPalette.ColorRole.Text).lightness() > 128
+        menu.setStyleSheet(_DARK_MENU_QSS if dark else _LIGHT_MENU_QSS)
         for act in list(menu.actions()):
             txt = (act.text() or "").lower().replace("&", "")
             if txt.startswith("paste"):
@@ -2127,6 +2200,8 @@ class NoteWindow(QWidget):
         self._show_in_taskbar = show_in_taskbar
         self._is_list = bool(list_items)
         self._auto_size = False
+        self._formatting_expanded = False
+        self.setFont(crisp_font(self.font()))
 
         # Explicit per-window icon. QApplication's windowIcon usually
         # cascades, but on Windows the taskbar reads the per-window icon
@@ -2154,6 +2229,7 @@ class NoteWindow(QWidget):
 
         # Main container (rounded rect with color)
         self.container = QWidget(self)
+        self.container.setObjectName("floatingNoteSurface")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -2161,8 +2237,12 @@ class NoteWindow(QWidget):
         layout.addWidget(self.container)
 
         inner = QVBoxLayout(self.container)
-        inner.setContentsMargins(0, 0, 0, 0)
+        inner.setContentsMargins(1, 1, 1, 1)
         inner.setSpacing(0)
+
+        # Dedicated drag surface, above the editable title and action buttons.
+        self.title_drag_sliver = TitleDragSliver(self)
+        inner.addWidget(self.title_drag_sliver)
 
         # Title bar
         self.title_bar = TitleBar(title, color_hex, self)
@@ -2174,13 +2254,9 @@ class NoteWindow(QWidget):
         self.title_bar.set_pinned(pinned)
         inner.addWidget(self.title_bar)
 
-        # Extra drag surface — the title bar proper is mostly consumed
-        # by the editable title field and action buttons.
-        self.title_drag_sliver = TitleDragSliver(self)
-        inner.addWidget(self.title_drag_sliver)
-
         # Text body
         self.text_edit = NoteTextEdit(self)
+        self.text_edit.setMinimumHeight(38)
         if html and not list_items:
             self.text_edit.setHtml(html)
         else:
@@ -2190,6 +2266,8 @@ class NoteWindow(QWidget):
         # Real per-item checklist editor (used when ``_is_list`` is True).
         # Stays hidden when the note is plain-text mode.
         self.checklist_editor = ChecklistEditor(self)
+        self.checklist_editor.setMinimumHeight(38)
+        self.checklist_editor._vbox.setContentsMargins(16, 8, 16, 8)
         self.checklist_editor.setVisible(False)
         self.checklist_editor.changed.connect(self._on_checklist_changed)
         inner.addWidget(self.checklist_editor, stretch=1)
@@ -2200,21 +2278,35 @@ class NoteWindow(QWidget):
             self.text_edit.setVisible(False)
             self.checklist_editor.setVisible(True)
 
-        # Formatting toolbar
+        # Formatting expands above the actions instead of occupying every note.
         self.fmt_toolbar = FormattingToolbar(self.text_edit, color_hex, self)
         inner.addWidget(self.fmt_toolbar)
-        if list_items:
-            self.fmt_toolbar.setVisible(False)
+        self.fmt_toolbar.hide()
 
         # Connect text changed AFTER setting initial content
         self.text_edit.textChanged.connect(self._on_text_changed)
 
-        # Bottom bar
-        bottom = QHBoxLayout()
-        bottom.setContentsMargins(8, 2, 8, 2)
+        self.action_bar = QWidget(self)
+        self.action_bar.setObjectName("floatingNoteActions")
+        self.action_bar.setStyleSheet("QWidget#floatingNoteActions { background: transparent; }")
+        bottom = QHBoxLayout(self.action_bar)
+        bottom.setContentsMargins(10, 2, 10, 8)
+        bottom.setSpacing(4)
+        self.format_btn = self._action_button("Text formatting", checkable=True)
+        self.format_btn.clicked.connect(self.set_formatting_expanded)
+        bottom.addWidget(self.format_btn)
+        # Retain the title-bar signal/API, but put its palette in the footer.
+        bottom.addWidget(self.title_bar.color_btn)
+        self.title_bar.color_btn.show()
+        self.more_btn = self._action_button("More note actions")
+        self.more_btn.clicked.connect(self._show_more_menu)
+        bottom.addWidget(self.more_btn)
         self.char_count = QLabel("")
+        self.char_count.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.char_count.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         bottom.addWidget(self.char_count, stretch=1)
-        inner.addLayout(bottom)
+        inner.addWidget(self.action_bar)
+        self.refresh_formatting_visibility()
 
         # Resize handles — thin overlay strips floating on top of the
         # container along all 4 edges and 4 corners, so the window can
@@ -2277,23 +2369,18 @@ class NoteWindow(QWidget):
         # When dark mode is on, render with the dark variant + white text;
         # the wire colour stays light so Keep keeps a clean palette.
         if self._dark_mode:
-            from config import KEEP_COLORS_DARK, KEEP_COLORS
-            name = next(
-                (k for k, v in KEEP_COLORS.items() if v == color_hex),
-                "Yellow",
-            )
-            bg = KEEP_COLORS_DARK.get(name, color_hex)
-            text_color = "#f1f3f4"
+            bg = card_color(color_hex)
+            text_color = FOREGROUND
         else:
             bg = color_hex
             text_color = "#333"
         self.container.setStyleSheet(f"""
-            QWidget {{
+            QWidget#floatingNoteSurface {{
                 background: {bg};
+                border: 1px solid {BORDER if self._dark_mode else 'rgba(0,0,0,0.20)'};
                 border-radius: 8px;
             }}
         """)
-        self.text_edit.setStyleSheet(self.text_edit.styleSheet())  # ensure repaint
         # In dark mode, give the selection a brighter background AND keep
         # text white so it stays readable. In light mode the constructor
         # default (black-on-blue-tint) handles things; here we override
@@ -2312,13 +2399,13 @@ class NoteWindow(QWidget):
             QTextEdit {{
                 border: none;
                 background: transparent;
-                padding: 8px;
+                padding: 8px 12px;
                 color: {text_color};
                 {sel_qss}
             }}
             QScrollBar:vertical {{ width: 6px; background: transparent; }}
             QScrollBar::handle:vertical {{
-                background: rgba(0,0,0,0.18); border-radius: 3px;
+                background: {'rgba(255,255,255,0.25)' if self._dark_mode else 'rgba(0,0,0,0.18)'}; border-radius: 3px;
                 min-height: 30px;
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
@@ -2334,6 +2421,7 @@ class NoteWindow(QWidget):
         self.title_drag_sliver.set_dark(self._dark_mode)
         self.checklist_editor.set_dark(self._dark_mode)
         self._apply_char_count_style()
+        self._style_actions()
         # Recolour the per-window taskbar icon to match the note.
         try:
             from app_icon import make_icon as _make_icon
@@ -2357,7 +2445,7 @@ class NoteWindow(QWidget):
             self.note_changed.emit(self.note_id)
 
     def _update_char_count(self):
-        if self._is_list and self.checklist_editor.isVisible():
+        if self._is_list:
             count = sum(len(it.get("text", ""))
                         for it in self.checklist_editor.get_items())
         else:
@@ -2368,11 +2456,42 @@ class NoteWindow(QWidget):
         """(Re)apply the char-count label's colour/size for the current
         dark mode + font scale. Single source of truth — called from
         __init__, _apply_color, and refresh_font_scale."""
-        cc_color = ("rgba(255,255,255,0.45)" if self._dark_mode
-                    else "rgba(0,0,0,0.3)")
+        cc_color = MUTED if self._dark_mode else "#5f6368"
         self.char_count.setStyleSheet(
             f"color: {cc_color}; font-size: {_scaled_px(BASE_CHARCOUNT_PX)}px; background: transparent;"
         )
+
+    def _action_button(self, label, *, checkable=False):
+        button = QPushButton(self)
+        button.setFixedSize(32, 32)
+        button.setIconSize(QSize(20, 20))
+        button.setCheckable(checkable)
+        button.setToolTip(label)
+        button.setAccessibleName(label)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        return button
+
+    def _style_actions(self):
+        color = MUTED if self._dark_mode else "#5f6368"
+        hover = "rgba(255,255,255,0.08)" if self._dark_mode else "rgba(0,0,0,0.08)"
+        for button, name in ((self.format_btn, "format"), (self.more_btn, "more")):
+            button.setIcon(interface_icon(name, color))
+            button.setStyleSheet(
+                "QPushButton { background: transparent; border: none; border-radius: 16px; padding: 6px; }"
+                f"QPushButton:hover, QPushButton:focus, QPushButton:checked {{ background: {hover}; }}")
+
+    def set_formatting_expanded(self, expanded):
+        self._formatting_expanded = bool(expanded)
+        self.refresh_formatting_visibility()
+
+    def refresh_formatting_visibility(self):
+        """Background sync must not open a panel the user has collapsed."""
+        self.format_btn.setVisible(not self._is_list)
+        self.format_btn.setChecked(self._formatting_expanded)
+        self.fmt_toolbar.setVisible(self._formatting_expanded and not self._is_list)
+        self._update_char_count()
+        self._schedule_content_fit()
 
     def _on_close(self):
         self.hide()
@@ -2455,7 +2574,6 @@ class NoteWindow(QWidget):
             self.end_sync_render()
             self.checklist_editor.setVisible(False)
             self.text_edit.setVisible(True)
-            self.fmt_toolbar.setVisible(True)
         else:
             # Plain text -> checklist: each non-empty line becomes an item.
             raw = self.text_edit.toPlainText()
@@ -2470,7 +2588,8 @@ class NoteWindow(QWidget):
             self.end_sync_render()
             self.text_edit.setVisible(False)
             self.checklist_editor.setVisible(True)
-            self.fmt_toolbar.setVisible(False)
+        self.refresh_formatting_visibility()
+        self._update_char_count()
         self.note_changed.emit(self.note_id)
 
     @property
@@ -2672,20 +2791,11 @@ class NoteWindow(QWidget):
         handles["ne"].setGeometry(w - m, 0, m, m)
         handles["sw"].setGeometry(0, h - m, m, m)
         handles["se"].setGeometry(w - m, h - m, m, m)
-        # The north strip stops short of the pin/colour/close buttons
-        # (~28px each + spacing + margin, reserved on the right) so a
-        # click near the top of those buttons isn't intercepted by the
-        # resize strip instead — those buttons are vertically centred
-        # in the 32px title bar, so their top few pixels sit inside
-        # the handle's y-range across its full width otherwise.
-        button_row_reserve = 100
-        handles["n"].setGeometry(
-            m, 0, max(0, w - m - button_row_reserve), m,
-        )
+        # Only the outer 3px resize at the top; the visible grip stays draggable.
+        handles["n"].setGeometry(m, 0, max(0, w - 2 * m), 3)
         handles["s"].setGeometry(m, h - m, max(0, w - 2 * m), m)
-        # Left/right edges start below the title bar so they don't steal
-        # clicks from the pin/colour/close buttons that live there.
-        top_y = self.title_bar.height()
+        # Include the grip and the actual (potentially wrapped) header height.
+        top_y = self.title_bar.geometry().bottom() + 1
         side_h = max(0, h - top_y - m)
         handles["w"].setGeometry(0, top_y, m, side_h)
         handles["e"].setGeometry(w - m, top_y, m, side_h)
@@ -2720,16 +2830,29 @@ class NoteWindow(QWidget):
         self.save_geometry()
         event.accept()
 
-    def contextMenuEvent(self, event):
+    def _note_actions_menu(self):
         menu = QMenu(self)
-        menu.setStyleSheet(_LIGHT_MENU_QSS)
-        delete_action = menu.addAction("🗑  Delete note")
+        menu.setStyleSheet(_DARK_MENU_QSS if self._dark_mode else _LIGHT_MENU_QSS)
+        hide_action = menu.addAction("Hide desktop note")
+        hide_action.triggered.connect(self._on_close)
         fit_action = menu.addAction("Fit height to content")
         fit_action.setCheckable(True)
         fit_action.setChecked(self._auto_size)
-        chosen = menu.exec(event.globalPos())
-        if chosen == delete_action:
-            self.note_deleted.emit(self.note_id)
-        elif chosen == fit_action:
-            self.set_auto_size(fit_action.isChecked())
+        def toggle_fit(checked):
+            self.set_auto_size(checked)
             self.save_geometry()
+        fit_action.triggered.connect(toggle_fit)
+        menu.addSeparator()
+        delete_action = menu.addAction("Delete note")
+        delete_action.triggered.connect(lambda: self.note_deleted.emit(self.note_id))
+        return menu
+
+    def _show_more_menu(self):
+        menu = self._note_actions_menu()
+        menu.exec(self.more_btn.mapToGlobal(QPoint(0, self.more_btn.height())))
+        menu.deleteLater()
+
+    def contextMenuEvent(self, event):
+        menu = self._note_actions_menu()
+        menu.exec(event.globalPos())
+        menu.deleteLater()

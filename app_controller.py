@@ -2516,7 +2516,6 @@ class AppController(QObject):
                 win.set_list_items(note.list_items)
                 win.text_edit.setVisible(False)
                 win.checklist_editor.setVisible(True)
-                win.fmt_toolbar.setVisible(False)
             elif getattr(note, "styled_doc", None) is not None:
                 # Cursor-based render preserves empty paragraphs and
                 # avoids HTML round-trip artefacts (NBSP injection,
@@ -2531,18 +2530,16 @@ class AppController(QObject):
                 self._rendered_doc[note_id] = note.styled_doc
                 win.checklist_editor.setVisible(False)
                 win.text_edit.setVisible(True)
-                win.fmt_toolbar.setVisible(True)
             elif note.html:
                 # Preserve any local rich-text formatting the user has set.
                 win.set_html(note.html)
                 win.checklist_editor.setVisible(False)
                 win.text_edit.setVisible(True)
-                win.fmt_toolbar.setVisible(True)
             else:
                 win.set_text(note.text)
                 win.checklist_editor.setVisible(False)
                 win.text_edit.setVisible(True)
-                win.fmt_toolbar.setVisible(True)
+            win.refresh_formatting_visibility()
             win.set_title(note.title)
             win._apply_color(note.color_hex)
             # The widget now actually reflects the cache -- see

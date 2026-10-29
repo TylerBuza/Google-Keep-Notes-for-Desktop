@@ -15,6 +15,7 @@ def main():
     parser.add_argument("--editor", choices=("text", "checklist", "short", "long"))
     parser.add_argument("--two-way", action="store_true", help="Show fictional sync-on UI; never connects")
     parser.add_argument("--card", action="store_true", help="Capture a fictional card to compare typography")
+    parser.add_argument("--floating", action="store_true", help="Capture a fictional desktop note")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="keep-dashboard-") as data:
         os.environ["APPDATA"] = data
@@ -48,6 +49,7 @@ def main():
         dashboard.show()
         target = dashboard
         editor = None
+        floating = None
         if args.editor:
             sample = samples[1] if args.editor == "checklist" else samples[0]
             if args.editor in ("short", "long"):
@@ -56,6 +58,13 @@ def main():
             editor = dashboard.create_editor(sample)
             editor.save_requested.connect(lambda changes: editor.accept())
             dashboard.show_editor()
+        if args.floating:
+            from note_window import NoteWindow
+            floating = NoteWindow("demo-floating", title="Weekend inspiration",
+                                  text="A little space for a good idea.", color_hex="#D7AEFB",
+                                  dark_mode=True, pinned=True)
+            floating.show()
+            target = floating
         for _ in range(8):
             app.processEvents()
         if args.card:
@@ -66,6 +75,8 @@ def main():
         print(str(args.output))
         if editor is not None:
             editor.accept()
+        if floating is not None:
+            floating.close()
         dashboard.close()
         app.processEvents()
 

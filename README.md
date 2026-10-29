@@ -92,7 +92,13 @@ by Google. Asset provenance is recorded in `keep_brand.py`.
   compact, growing notes expand up to the app's available height and then scroll.
   Desktop notes also auto-fit height without changing their width/placement.
   Manually dragging a top/bottom/corner resize handle keeps that height; turn
-  **Fit height to content** back on from the desktop note's context menu.
+  **Fit height to content** back on from the desktop note's More/context menu.
+- Floating notes share the dashboard's flat card colors, border and vector icons.
+  Titles wrap when reading (click to edit). Use the top grip to drag, the monitor
+  to toggle local always-on-top, and **×** to hide without deleting. The compact
+  footer holds text formatting, the color palette, and More; formatting starts
+  collapsed and background sync preserves your open/closed choice. Checklist
+  notes hide text-formatting controls. More does not offer note-type conversion.
 - Default card/editor/floating-note text is larger. Google Sans titles and Roboto
   bodies/controls use smooth grayscale antialiasing without forced full pixel-grid
   hinting. The original OFL-licensed fonts and notices are bundled locally, not

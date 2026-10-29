@@ -129,6 +129,16 @@ model HTML remains untouched until a real edit, and title-only editor saves do
 not reserialize the body. Font normalization preserves text, sizes, emphasis,
 headings and link restrictions. It changes no sync permission or wire typeface.
 
+Floating-note chrome uses the same local card palette and vector icons. The
+wrapped title remains a literal-plain-text QLineEdit, with native single-line
+editing on focus, not an HTML renderer. The footer's collapsed formatting panel
+is local UI state; background refreshes retain that preference. Palette selection
+still passes the canonical light wire color plus the local dark preference to
+the existing edit path. The monitor only changes local always-on-top, and Hide
+is separate from the existing guarded Delete path. More exposes no remote type
+conversion or new cloud operations. Restyling and toggling formatting visibility
+do not mark contents dirty or change consent, networking or recovery behavior.
+
 Drafts commit on the user-requested close actions: outside/backdrop or logo
 clicks, Close, or Escape (and Save in a dashboard-exit prompt). Opening/reading
 a popup is not an edit. Only edited fields are committed; title-only edits

@@ -116,6 +116,10 @@ def icon(name, color=FOREGROUND):
         lines([(21, 12), (16, 14), (14, 17), (16, 20)])
         for x, y in ((8, 8), (13, 6), (17, 9), (6, 13)):
             p.drawEllipse(QRectF(x, y, 1, 1))
+    elif name == "format":
+        lines([(6, 18), (12, 4), (18, 18)])
+        lines([(8, 13), (16, 13)])
+        lines([(4, 21), (20, 21)])
     elif name == "settings":
         for y, x in ((6, 9), (12, 16), (18, 7)):
             lines([(3, y), (21, y)])
