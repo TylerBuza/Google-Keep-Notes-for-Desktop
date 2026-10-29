@@ -203,24 +203,15 @@ def test_interactive_login_opens_manager_only_after_one_verified_pull(tmp_path, 
 
 @pytest.mark.parametrize("titled", [False, True])
 def test_manager_renders_note_text_literally_without_html_artifacts(qapp, titled):
-    from app_controller import NoteManagerDialog
+    from note_manager import NoteCard
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QLabel
-    title_label = QLabel()
-    snippet_label = QLabel()
-    title_label.setTextFormat(Qt.TextFormat.PlainText)
-    snippet_label.setTextFormat(Qt.TextFormat.PlainText)
     note = KeepNote(id="synthetic", title="Literal <b> & title" if titled else "",
                     text="Literal <img src='https://not-google.test/x'> & text")
-    controller = SimpleNamespace(_rows={note.id: {"title_lbl": title_label,
-        "snip_lbl": snippet_label, "frame": MagicMock(), "pin_lbl": MagicMock()}})
+    card = NoteCard(note, False)
     try:
-        NoteManagerDialog._update_row(controller, note)
-        assert title_label.text() == (note.title if titled else note.text[:50])
-        assert title_label.font().bold() is titled
-        assert title_label.font().italic() is not titled
-        if titled:
-            assert snippet_label.text() == note.text
+        assert card.title.text() == note.title
+        assert card.body.text() == note.text
+        assert card.title.textFormat() == Qt.TextFormat.PlainText
+        assert card.body.textFormat() == Qt.TextFormat.PlainText
     finally:
-        title_label.deleteLater()
-        snippet_label.deleteLater()
+        card.deleteLater()

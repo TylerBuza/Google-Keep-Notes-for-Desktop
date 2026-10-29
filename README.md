@@ -53,13 +53,37 @@ Run this copy from source using the commands below. Upstream installers do
 
 - **One window per note** — drag them anywhere on screen
 - **Remembers positions** — every window reopens exactly where you left it
-- **Google Keep sync** — two-way sync keeps your notes in the cloud
+- **Experimental Google Keep sync** — read/import, with guarded writes opt-in only
 - **System tray** — lives quietly in your taskbar tray
 - **Auto-start** — optional "Start with Windows" toggle
 - **Reviewed updates only** — automatic installer downloads disabled
 - **Color-coded** — all 12 Google Keep colors + local dark mode varients
 - **Pin notes** — toggle always-on-top per note
 - **Minimal UI** — frameless, clean, stays out of your way
+
+## Keep-style dashboard
+
+Open **Manage notes** from the tray for the native dark dashboard: searchable
+masonry cards, Pinned/Other sections, grid/list view, note colors, and a separate
+**Desktop pins** view. No website, remote fonts, or linked images are loaded.
+
+- Click a card to edit a draft. **Save** commits locally; **Cancel** confirms
+  before discarding changes. If that note changed during editing, conflicting
+  draft fields are retained in the editor rather than overwriting newer content.
+- **Take a note…** and the checklist button create drafts without opening a
+  floating window. Empty untouched drafts do not create notes.
+- **Thumbtack** changes Keep pinning/order. **Monitor** opens an always-on-top
+  desktop note; clicking it again hides that window without changing Keep's pin.
+- Color display uses local dark equivalents without changing cloud note colors.
+  Explicit color selection is a normal edit, still subject to cloud-write opt-in.
+- More actions include reorder, delete (with confirmation), and type conversion
+  for local notes only. Failed/blocked deletes leave the card present.
+
+Archive and Trash browsing, label editing, attachments, and reminders are **not
+implemented**. Archive/Trash navigation is disabled; any labels already in the
+local note model can be viewed/filtered but are not a claim of label sync support.
+Account and cloud-write controls remain in the tray menu. The dashboard does not
+enable writes or change remembered-login security.
 
 ## Connecting Google Keep
 
@@ -100,9 +124,10 @@ If sign-in fails, `login-validation.json` records only fixed failure categories,
 HTTP status, known Google error codes and safe request metadata. It contains no
 email, password, cookies, tokens, note text or full URLs. Background resource
 blocks appear under Security details rather than as a red login failure.
-Google sign-in and read access were verified in a manual test. A final-page
-parsing bug prevented the app from completing the import; that fix still needs
-a manual app retry. A separate browser shutdown hang remains under investigation.
+Google sign-in and read access were verified in a manual test. The final-page
+import fix in private.6 passed a fresh app read/decode check and the user confirmed
+notes appeared. Live cloud writes remain unverified. A separate browser shutdown
+hang remains under investigation.
 
 ## Usage
 

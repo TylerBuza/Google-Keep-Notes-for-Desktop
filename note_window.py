@@ -1497,6 +1497,35 @@ class _RowLineEdit(QLineEdit):
         super().keyPressEvent(ev)
 
 
+class _ChecklistCheckBox(QCheckBox):
+    """Local vector indicator, readable on both dark and light notes."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setFixedSize(22, 22)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def hitButton(self, pos):
+        return self.rect().contains(pos)
+
+    def paintEvent(self, event):
+        dark = bool(getattr(self.parent().editor(), "_dark_mode", False))
+        color = QColor("#9aa0a6" if dark else "#5f6368")
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(color, 1.5))
+        painter.setBrush(color if self.isChecked() else Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRect(3, 3, 16, 16), 2, 2)
+        if self.isChecked():
+            painter.setPen(QPen(QColor("#202124" if dark else "#ffffff"), 1.8))
+            painter.drawLine(6, 11, 10, 15)
+            painter.drawLine(10, 15, 16, 7)
+        if self.hasFocus():
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(color, 1, Qt.PenStyle.DotLine))
+            painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 3, 3)
+
+
 class ChecklistRow(QFrame):
     """A single checkbox row inside :class:`ChecklistEditor`.
 
@@ -1527,29 +1556,8 @@ class ChecklistRow(QFrame):
         self.indent_spacer.setFixedWidth(self._indent * _INDENT_PX)
         row.addWidget(self.indent_spacer)
 
-        self.checkbox = QCheckBox(self)
+        self.checkbox = _ChecklistCheckBox(self)
         self.checkbox.setChecked(bool(checked))
-        # Custom indicator styling: an empty checkbox is otherwise
-        # invisible against the note's coloured background. Use a
-        # subtle white fill + dark border so both states are obvious.
-        self.checkbox.setStyleSheet(
-            "QCheckBox { background: transparent; }"
-            "QCheckBox::indicator {"
-            "    width: 16px; height: 16px;"
-            "    border: 1.5px solid rgba(0,0,0,0.55);"
-            "    border-radius: 3px;"
-            "    background: rgba(255,255,255,0.85);"
-            "}"
-            "QCheckBox::indicator:hover {"
-            "    border-color: rgba(0,0,0,0.85);"
-            "    background: rgba(255,255,255,1.0);"
-            "}"
-            "QCheckBox::indicator:checked {"
-            "    background: rgba(0,0,0,0.78);"
-            "    border-color: rgba(0,0,0,0.78);"
-            "    image: none;"
-            "}"
-        )
         self.checkbox.toggled.connect(self._on_checked)
         row.addWidget(self.checkbox)
 
@@ -1636,16 +1644,21 @@ class ChecklistRow(QFrame):
             self.set_indent(self._indent + 1)
 
     def _apply_checked_style(self, checked: bool):
+        dark = bool(getattr(self.editor(), "_dark_mode", False))
+        color = ("#9aa0a6" if checked else "#e8eaed") if dark else ("#888" if checked else "#222")
+        font = self.line.font()
+        font.setStrikeOut(bool(checked))
+        self.line.setFont(font)
         if checked:
             self.line.setStyleSheet(
                 "QLineEdit { background: transparent; border: none;"
-                "            padding: 2px; color: #888;"
+                f"            padding: 2px; color: {color};"
                 "            text-decoration: line-through; }"
             )
         else:
             self.line.setStyleSheet(
                 "QLineEdit { background: transparent; border: none;"
-                "            padding: 2px; color: #222; }"
+                f"            padding: 2px; color: {color}; }}"
             )
 
 
@@ -1679,6 +1692,7 @@ class ChecklistEditor(QScrollArea):
         self.setWidget(self._host)
 
         self._rows: list[ChecklistRow] = []
+        self._dark_mode = False
         self._suppress_changed: bool = False
         # Drag-reorder state
         self._dragging_row: ChecklistRow | None = None
@@ -1715,6 +1729,12 @@ class ChecklistEditor(QScrollArea):
 
     def get_items(self) -> list[dict]:
         return [r.to_dict() for r in self._rows]
+
+    def set_dark(self, dark: bool):
+        self._dark_mode = dark
+        for row in self._rows:
+            row._apply_checked_style(row.is_checked())
+            row.checkbox.update()
 
     def set_font_scale(self):
         """Re-apply the current global FONT_SCALE to every row's text."""
@@ -2267,6 +2287,7 @@ class NoteWindow(QWidget):
         self.title_bar.set_dark(self._dark_mode)
         self.fmt_toolbar.set_dark(self._dark_mode)
         self.title_drag_sliver.set_dark(self._dark_mode)
+        self.checklist_editor.set_dark(self._dark_mode)
         self._apply_char_count_style()
         # Recolour the per-window taskbar icon to match the note.
         try:

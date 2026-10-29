@@ -14,8 +14,7 @@ from PySide6.QtNetwork import QNetworkCookie
 from PySide6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QDialog,
     QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QMessageBox, QFrame, QScrollArea, QWidget, QCheckBox, QSizePolicy,
-    QTabWidget, QComboBox, QListWidget, QTextEdit,
+    QMessageBox, QFrame, QWidget, QCheckBox, QListWidget, QTextEdit,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineProfile
@@ -34,6 +33,7 @@ from app_icon import make_icon as _make_icon
 import note_window
 from note_window import NoteWindow
 from note_model import KeepNote
+from note_manager import NoteManagerDialog, NoteEditorDialog, edit_snapshot
 from updater import UpdateChecker, prompt_and_install
 
 log = logging.getLogger(__name__)
@@ -747,450 +747,6 @@ class LoginDialog(QDialog):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  Note Manager Dialog
-# ═══════════════════════════════════════════════════════════════════════
-
-class _NoWheelComboBox(QComboBox):
-    """QComboBox that ignores mouse-wheel scrolling.
-
-    Qt's default QComboBox changes selection on every wheel tick even
-    without the dropdown open — idly scrolling a Settings page while
-    the cursor happens to pass over this combo silently changes the
-    value. Used for the font-scale picker, where each change triggers
-    a disk write and a full re-render of every open note window."""
-
-    def wheelEvent(self, event):
-        event.ignore()
-
-
-class NoteManagerDialog(QDialog):
-    """Modal to manage which notes appear on the desktop."""
-
-    note_deleted = Signal(str)  # emitted immediately on confirmed delete
-    note_create_requested = Signal()  # emitted when user clicks "New note"
-    visibility_changed = Signal(str, bool)  # note_id, is_visible (live)
-    checklist_toggle_requested = Signal(str)  # note_id
-    pin_toggle_requested = Signal(str)        # note_id (Keep is_pinned)
-    reorder_requested = Signal(str, str)      # note_id, action: top|up|down|bottom
-    font_scale_changed = Signal(float)        # new global font scale
-
-    # Presets offered in the Settings tab's font-scale picker.
-    _FONT_SCALE_PRESETS = [0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
-
-    def __init__(self, notes: dict, visibility: dict, font_scale: float = 1.0, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("KeepDesktop – Manage Notes")
-        self.setMinimumSize(500, 480)
-        self.result_visibility = dict(visibility)
-        self._checkboxes: dict[str, QCheckBox] = {}
-        self._rows: dict[str, dict] = {}  # note_id -> {frame, title_lbl, snip_lbl, pin_lbl}
-        self._all_notes: dict = {}  # last-known notes (id -> KeepNote) for filtering
-        self._search_text: str = ""
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(8)
-
-        tabs = QTabWidget(self)
-        layout.addWidget(tabs, stretch=1)
-
-        notes_page = QWidget()
-        notes_layout = QVBoxLayout(notes_page)
-        notes_layout.setSpacing(8)
-
-        header = QLabel("<b>Choose which notes to show on your desktop:</b>")
-        notes_layout.addWidget(header)
-
-        # Search bar + New note button row
-        search_row = QHBoxLayout()
-        self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("Search title and contents…")
-        self._search_edit.setClearButtonEnabled(True)
-        self._search_edit.textChanged.connect(self._on_search_changed)
-        search_row.addWidget(self._search_edit, stretch=1)
-
-        new_btn = QPushButton("✚  New note")
-        new_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        new_btn.setStyleSheet(
-            "QPushButton { background: #4285f4; color: white; border: none;"
-            "              border-radius: 6px; font-size: 12px; font-weight: bold;"
-            "              padding: 6px 14px; }"
-            "QPushButton:hover { background: #3367d6; }"
-        )
-        new_btn.clicked.connect(self.note_create_requested.emit)
-        search_row.addWidget(new_btn)
-        notes_layout.addLayout(search_row)
-
-        # Quick-select row
-        quick_row = QHBoxLayout()
-        sel_all = QPushButton("Select All")
-        sel_all.clicked.connect(lambda: self._set_all(True))
-        quick_row.addWidget(sel_all)
-        sel_none = QPushButton("Select None")
-        sel_none.clicked.connect(lambda: self._set_all(False))
-        quick_row.addWidget(sel_none)
-        quick_row.addStretch()
-        notes_layout.addLayout(quick_row)
-
-        # Scrollable note list
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea { border: 1px solid #ddd; border-radius: 6px; }")
-        scroll_widget = QWidget()
-        self._list_layout = QVBoxLayout(scroll_widget)
-        self._list_layout.setContentsMargins(4, 4, 4, 4)
-        self._list_layout.setSpacing(4)
-
-        # Build initial rows
-        self.refresh(notes, visibility)
-
-        scroll.setWidget(scroll_widget)
-        notes_layout.addWidget(scroll, stretch=1)
-
-        tabs.addTab(notes_page, "Notes")
-        tabs.addTab(self._build_settings_page(font_scale), "Settings")
-
-        # Bottom buttons
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        close_btn = QPushButton("Close")
-        close_btn.setDefault(True)
-        close_btn.setStyleSheet(
-            "QPushButton { background: #4285f4; color: white; border: none;"
-            "              border-radius: 6px; font-size: 13px; font-weight: bold;"
-            "              padding: 6px 24px; }"
-            "QPushButton:hover { background: #3367d6; }"
-        )
-        close_btn.clicked.connect(self.accept)
-        btn_row.addWidget(close_btn)
-        layout.addLayout(btn_row)
-
-    # ── Settings tab ─────────────────────────────────────────────────
-
-    def _build_settings_page(self, font_scale: float) -> QWidget:
-        page = QWidget()
-        page_layout = QVBoxLayout(page)
-        page_layout.setSpacing(8)
-        page_layout.setContentsMargins(12, 12, 12, 12)
-
-        label = QLabel("<b>Text size</b>")
-        page_layout.addWidget(label)
-        hint = QLabel(
-            "Scales the body, heading, and toolbar text in every note "
-            "window — turn it up on a 4K display, or down to fit more "
-            "on screen. Applies immediately to open notes."
-        )
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: #666; font-size: 11px;")
-        page_layout.addWidget(hint)
-
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Note text size:"))
-        self._font_scale_combo = _NoWheelComboBox()
-        closest = min(
-            self._FONT_SCALE_PRESETS, key=lambda p: abs(p - font_scale)
-        )
-        for preset in self._FONT_SCALE_PRESETS:
-            self._font_scale_combo.addItem(f"{round(preset * 100)}%", preset)
-        self._font_scale_combo.setCurrentIndex(
-            self._FONT_SCALE_PRESETS.index(closest)
-        )
-        self._font_scale_combo.currentIndexChanged.connect(
-            self._on_font_scale_selected
-        )
-        row.addWidget(self._font_scale_combo)
-        row.addStretch()
-        page_layout.addLayout(row)
-        page_layout.addStretch()
-        return page
-
-    def _on_font_scale_selected(self, index: int):
-        scale = self._font_scale_combo.itemData(index)
-        if scale is not None:
-            self.font_scale_changed.emit(float(scale))
-
-    # ── Row construction / refresh ─────────────────────────────────────
-
-    def refresh(self, notes: dict, visibility: dict):
-        """Update the row list to reflect the current notes/visibility.
-
-        Existing rows are updated in place; new notes get a new row;
-        removed notes are dropped. Called both at construction time and
-        whenever notes change while the dialog is open.
-        """
-        # Remember the full set so search filtering can re-run later
-        self._all_notes = dict(notes)
-
-        # Merge visibility for any new notes (default visible)
-        for nid in notes:
-            if nid not in self.result_visibility:
-                self.result_visibility[nid] = visibility.get(nid, True)
-
-        # Apply current search filter
-        query = self._search_text.strip().lower()
-        if query:
-            visible_notes = {
-                nid: n for nid, n in notes.items()
-                if query in (n.title or "").lower()
-                or query in (n.text or "").lower()
-            }
-        else:
-            visible_notes = dict(notes)
-
-        # Drop rows whose notes are no longer in the (filtered) set
-        for nid in list(self._rows.keys()):
-            if nid not in visible_notes:
-                self._remove_row_widget(nid)
-
-        sorted_notes = sorted(
-            visible_notes.values(),
-            key=lambda n: (
-                not n.pinned,
-                # User-imposed order wins (small ascending integers).
-                # Otherwise fall back to Keep's sortValue, descending
-                # — so notes appear in the same order as keep.google.com.
-                (0, n.local_order) if n.local_order
-                else (1, -int(n.sort_key or 0)),
-            ),
-        )
-
-        # Track desired order; we'll re-insert each frame in order
-        # (cheaper than rebuilding from scratch and preserves widgets).
-        # Remove the trailing stretch (if present) before re-inserting.
-        self._strip_stretch()
-
-        for idx, note in enumerate(sorted_notes):
-            if note.id in self._rows:
-                self._update_row(note)
-                frame = self._rows[note.id]["frame"]
-                # Re-insert at correct position
-                self._list_layout.removeWidget(frame)
-                self._list_layout.insertWidget(idx, frame)
-            else:
-                self._add_row(note, idx)
-
-        self._list_layout.addStretch()
-
-    def _on_search_changed(self, text: str):
-        self._search_text = text
-        if self._all_notes:
-            self.refresh(self._all_notes, self.result_visibility)
-
-    def _strip_stretch(self):
-        # Stretch is always the last item if present
-        count = self._list_layout.count()
-        if count == 0:
-            return
-        last = self._list_layout.itemAt(count - 1)
-        if last is not None and last.spacerItem() is not None:
-            self._list_layout.takeAt(count - 1)
-
-    def _add_row(self, note, position):
-        row = QFrame()
-        color = note.color_hex or "#FFF475"
-        row.setStyleSheet(
-            f"QFrame {{ background: {color}; border-radius: 6px;"
-            f" border: 1px solid rgba(0,0,0,0.08); }}"
-        )
-        row.setMinimumHeight(52)
-        row.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        row.customContextMenuRequested.connect(
-            lambda pos, nid=note.id, w=row: self._show_row_menu(nid, w, pos)
-        )
-
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(8, 6, 8, 6)
-        row_layout.setSpacing(8)
-
-        cb = QCheckBox()
-        cb.setChecked(self.result_visibility.get(note.id, True))
-        cb.stateChanged.connect(
-            lambda state, nid=note.id: self._on_toggle(nid, state)
-        )
-        row_layout.addWidget(cb)
-        self._checkboxes[note.id] = cb
-
-        pin_lbl = QLabel("📌")
-        pin_lbl.setStyleSheet("background: transparent; font-size: 12px;")
-        pin_lbl.setFixedWidth(20)
-        pin_lbl.setVisible(bool(note.pinned))
-        row_layout.addWidget(pin_lbl)
-
-        text_col = QVBoxLayout()
-        text_col.setSpacing(1)
-
-        title_label = QLabel("")
-        title_label.setTextFormat(Qt.TextFormat.PlainText)
-        title_label.setStyleSheet("background: transparent; color: #333; font-size: 12px;")
-        title_label.setMinimumWidth(0)
-        title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        text_col.addWidget(title_label)
-
-        snip_label = QLabel("")
-        snip_label.setTextFormat(Qt.TextFormat.PlainText)
-        snip_label.setStyleSheet(
-            "background: transparent; color: #666; font-size: 11px;"
-        )
-        snip_label.setWordWrap(True)
-        snip_label.setMaximumHeight(36)
-        snip_label.setMinimumWidth(0)
-        snip_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        text_col.addWidget(snip_label)
-
-        row_layout.addLayout(text_col, stretch=1)
-
-        del_btn = QPushButton("🗑")
-        del_btn.setFixedSize(28, 28)
-        del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        del_btn.setToolTip("Delete note")
-        del_btn.setStyleSheet(
-            "QPushButton { border: none; background: transparent; font-size: 14px; }"
-            "QPushButton:hover { background: rgba(0,0,0,0.1); border-radius: 4px; }"
-        )
-        del_btn.clicked.connect(
-            lambda checked, nid=note.id: self._delete_note(nid)
-        )
-        row_layout.addWidget(del_btn)
-
-        self._list_layout.insertWidget(position, row)
-        self._rows[note.id] = {
-            "frame": row,
-            "title_lbl": title_label,
-            "snip_lbl": snip_label,
-            "pin_lbl": pin_lbl,
-        }
-        self._update_row(note)
-
-    def _update_row(self, note):
-        row = self._rows.get(note.id)
-        if not row:
-            return
-        color = note.color_hex or "#FFF475"
-        row["frame"].setStyleSheet(
-            f"QFrame {{ background: {color}; border-radius: 6px;"
-            f" border: 1px solid rgba(0,0,0,0.08); }}"
-        )
-        row["pin_lbl"].setVisible(bool(note.pinned))
-
-        title = note.title or ""
-        snippet = (note.text[:120].replace("\n", " ").strip()) if note.text else ""
-        title_font = row["title_lbl"].font()
-        title_font.setBold(bool(title))
-        title_font.setItalic(not bool(title))
-        row["title_lbl"].setFont(title_font)
-
-        if title:
-            row["title_lbl"].setText(title)
-            row["snip_lbl"].setText(snippet)
-            row["snip_lbl"].setVisible(bool(snippet))
-        else:
-            row["title_lbl"].setText(
-                snippet[:50] or "(empty note)"
-            )
-            row["snip_lbl"].setText("")
-            row["snip_lbl"].setVisible(False)
-
-    def _remove_row_widget(self, note_id):
-        """Remove just the row widget (used when filtering)."""
-        row = self._rows.pop(note_id, None)
-        if row:
-            row["frame"].setParent(None)
-            row["frame"].deleteLater()
-        self._checkboxes.pop(note_id, None)
-
-    def _remove_row(self, note_id):
-        """Remove the row widget AND forget its visibility (used on delete)."""
-        self._remove_row_widget(note_id)
-        self.result_visibility.pop(note_id, None)
-
-    def _on_toggle(self, note_id, state):
-        is_visible = bool(state)
-        self.result_visibility[note_id] = is_visible
-        # Apply live so the user doesn't have to confirm
-        self.visibility_changed.emit(note_id, is_visible)
-
-    def _set_all(self, checked):
-        for nid, cb in self._checkboxes.items():
-            # Use blockSignals so we don't fire N individual events;
-            # we'll emit our own per-id signals afterwards.
-            cb.blockSignals(True)
-            cb.setChecked(checked)
-            cb.blockSignals(False)
-            self.result_visibility[nid] = checked
-            self.visibility_changed.emit(nid, checked)
-
-    def set_checkbox(self, note_id: str, checked: bool):
-        """Update a checkbox programmatically (e.g. when window is closed
-        externally). Does NOT re-emit visibility_changed."""
-        cb = self._checkboxes.get(note_id)
-        if cb is None:
-            return
-        if cb.isChecked() == checked:
-            return
-        cb.blockSignals(True)
-        cb.setChecked(checked)
-        cb.blockSignals(False)
-        self.result_visibility[note_id] = checked
-
-    def _delete_note(self, note_id):
-        reply = QMessageBox.question(
-            self, "Delete Note",
-            "Delete this note permanently?\n"
-            "This will also trash it on Google Keep if synced.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self.note_deleted.emit(note_id)
-            self._remove_row(note_id)
-
-    def _show_row_menu(self, note_id: str, row_widget, pos):
-        note = self._all_notes.get(note_id)
-        menu = QMenu(self)
-        menu.setStyleSheet(
-            "QMenu { background: #ffffff; color: #222; border: 1px solid #ccc;"
-            "        border-radius: 6px; padding: 4px; }"
-            "QMenu::item { padding: 6px 16px; border-radius: 4px;"
-            "              color: #222; }"
-            "QMenu::item:selected { background: #e0e0e0; color: #000; }"
-            "QMenu::separator { height: 1px; background: #ddd; margin: 4px 6px; }"
-        )
-        if note is not None:
-            label = ("☑  Convert to plain text"
-                     if getattr(note, "is_list", False)
-                     else "☑  Convert to checklist")
-        else:
-            label = "☑  Toggle checklist"
-        act_check = menu.addAction(label)
-        if note is not None:
-            pin_label = ("📌  Unpin from top of Keep"
-                         if getattr(note, "pinned", False)
-                         else "📌  Pin to top of Keep")
-        else:
-            pin_label = "📌  Toggle Keep pin"
-        act_pin = menu.addAction(pin_label)
-        menu.addSeparator()
-        act_top = menu.addAction("⏫  Move to top")
-        act_up = menu.addAction("⬆  Move up")
-        act_down = menu.addAction("⬇  Move down")
-        act_bottom = menu.addAction("⏬  Move to bottom")
-        chosen = menu.exec(row_widget.mapToGlobal(pos))
-        if chosen is None:
-            return
-        if chosen is act_check:
-            self.checklist_toggle_requested.emit(note_id)
-        elif chosen is act_pin:
-            self.pin_toggle_requested.emit(note_id)
-        elif chosen is act_top:
-            self.reorder_requested.emit(note_id, "top")
-        elif chosen is act_up:
-            self.reorder_requested.emit(note_id, "up")
-        elif chosen is act_down:
-            self.reorder_requested.emit(note_id, "down")
-        elif chosen is act_bottom:
-            self.reorder_requested.emit(note_id, "bottom")
-
-
-# ═══════════════════════════════════════════════════════════════════════
 #  App Controller
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -1449,6 +1005,13 @@ class AppController(QObject):
             self._login_action.setText(f"🔑  Sign out ({email})")
         else:
             self._login_action.setText("🔑  Sign in to Google Keep")
+        self._update_dashboard_sync_state()
+
+    def _update_dashboard_sync_state(self):
+        dlg = getattr(self, "_manager_dlg", None)
+        if dlg is not None:
+            dlg.set_sync_state(self.sync.is_authenticated,
+                               self.config.get("cloud_writes_enabled", False))
 
     def _on_login_action(self):
         if self.sync.is_authenticated:
@@ -1476,6 +1039,7 @@ class AppController(QObject):
         self._writes_action.blockSignals(True)
         self._writes_action.setChecked(enabled)
         self._writes_action.blockSignals(False)
+        self._update_dashboard_sync_state()
         if enabled:
             self._full_sync(force_resync=True)
 
@@ -1997,10 +1561,14 @@ class AppController(QObject):
         )
         dlg.setModal(False)
         dlg.note_deleted.connect(self._on_note_deleted)
-        dlg.note_create_requested.connect(self._new_note)
+        dlg.note_create_requested.connect(lambda: self._open_dashboard_editor())
+        dlg.checklist_create_requested.connect(lambda: self._open_dashboard_editor(is_list=True))
+        dlg.note_edit_requested.connect(self._open_dashboard_editor)
         dlg.visibility_changed.connect(self._on_manager_visibility_changed)
         dlg.checklist_toggle_requested.connect(self._toggle_note_checklist)
         dlg.pin_toggle_requested.connect(self._toggle_note_pin)
+        dlg.color_change_requested.connect(self._change_dashboard_color)
+        dlg.sync_requested.connect(self._manual_sync)
         dlg.reorder_requested.connect(self._reorder_note)
         dlg.font_scale_changed.connect(self._on_font_scale_changed)
         dlg.accepted.connect(lambda: self._on_manager_accepted(dlg))
@@ -2008,13 +1576,14 @@ class AppController(QObject):
         dlg.finished.connect(lambda _r: self._on_manager_closed())
         dlg.show()
         self._manager_dlg = dlg  # prevent GC
+        self._update_dashboard_sync_state()
         dlg.raise_()
         dlg.activateWindow()
         _force_foreground(dlg)
         QTimer.singleShot(50, lambda: _force_foreground(dlg))
 
     def _on_manager_visibility_changed(self, note_id: str, is_visible: bool):
-        """Apply a single checkbox change live (no Apply button needed)."""
+        """Desktop pinning is local only, entirely separate from Keep's pin."""
         self._visibility[note_id] = is_visible
         _save_visibility(self._visibility)
         note = self._notes.get(note_id)
@@ -2025,12 +1594,128 @@ class AppController(QObject):
             if win is None:
                 win = self._create_window(note)
                 self.windows[note_id] = win
+            win.title_bar.set_pinned(True)
+            win._on_pin_toggle(True)
             win.show()
             win.raise_()
+            QTimer.singleShot(0, lambda: self._regroup_window(note_id))
         else:
             if win is not None:
                 win.save_geometry()
                 win.hide()
+
+    def _open_dashboard_editor(self, note_id=None, *, is_list=False):
+        manager = getattr(self, "_manager_dlg", None)
+        if manager is None:
+            return
+        existing = manager._editor
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
+            return
+        is_new = note_id is None
+        note = (KeepNote(id=str(uuid.uuid4()), color_hex="#FFFFFF", dark_mode=True, is_list=is_list)
+                if is_new else self._notes.get(note_id))
+        if note is None:
+            return
+        editor = NoteEditorDialog(note, is_new=is_new, parent=manager)
+        manager._editor = editor
+        editor.save_requested.connect(lambda changes: self._save_dashboard_edit(editor, changes))
+
+        def finished(_result):
+            manager._editor = None
+            editor.deleteLater()
+
+        editor.finished.connect(finished)
+        editor.open()
+
+    def _save_dashboard_edit(self, editor, changes):
+        """Commit a draft without overwriting an edit or pull that arrived meanwhile."""
+        from copy import deepcopy
+        note_id = editor.note_id
+        original = self._notes.get(note_id)
+        if editor.is_new:
+            if not changes:
+                editor.accept()
+                return
+            if original is not None:
+                editor.show_error("This note already exists. Your draft has not been overwritten.")
+                return
+            note = KeepNote(id=note_id, color_hex="#FFFFFF", dark_mode=True,
+                            is_list=editor.base["is_list"])
+        else:
+            if original is None:
+                editor.show_error("This note was removed or its sync ID changed. Copy your draft before reopening it.")
+                return
+            current = edit_snapshot(original)
+            touched = {"title"} if "title" in changes else set()
+            if any(key in changes for key in ("text", "html", "list_items")):
+                touched.update(("text", "html", "is_list", "list_items"))
+            if any(current[key] != editor.base[key] for key in touched):
+                editor.show_error("This note changed while you were editing. Nothing was overwritten. "
+                                  "Copy your draft, then reopen the updated note.")
+                return
+            # Keep object identity: an in-flight create/push may still hold
+            # this exact note, just as it does while a floating note is typed.
+            # Replacing the object could lose a draft during UUID promotion.
+            before = deepcopy(original)
+            note = original
+        if not changes:
+            editor.accept()
+            return
+        if editor.is_new:
+            # Persist hidden-by-default before the cache entry. A stray
+            # visibility entry is harmless; an uncached visibility choice
+            # must not make a new dashboard note pop out on next startup.
+            self._visibility[note_id] = False
+            try:
+                _save_visibility(self._visibility)
+            except Exception:
+                self._visibility.pop(note_id, None)
+                editor.show_error("Could not save desktop visibility. Your draft is still open; try again.")
+                return
+        self._last_edit_time[note_id] = time.monotonic()
+        for key, value in changes.items():
+            setattr(note, key, deepcopy(value))
+        if any(key in changes for key in ("text", "html", "list_items")) and hasattr(note, "styled_doc"):
+            delattr(note, "styled_doc")
+        was_dirty = note_id in self._dirty
+        self._notes[note_id] = note
+        self._dirty.add(note_id)
+        try:
+            self._save_notes_to_disk()
+        except Exception:
+            if original is None:
+                self._notes.pop(note_id, None)
+                self._visibility.pop(note_id, None)
+            else:
+                for key in changes:
+                    setattr(original, key, deepcopy(getattr(before, key)))
+                if hasattr(before, "styled_doc"):
+                    original.styled_doc = before.styled_doc
+            if not was_dirty:
+                self._dirty.discard(note_id)
+            editor.show_error("Could not save securely. Your draft is still open; try again.")
+            return
+        self._refresh_window(note_id)
+        self._refresh_manager_if_open()
+        if self.sync.is_authenticated:
+            self._sync_debounce.start()
+        editor.accept()
+
+    def _change_dashboard_color(self, note_id, color_hex):
+        from config import KEEP_COLORS
+        note = self._notes.get(note_id)
+        if note is None or color_hex not in KEEP_COLORS.values() or note.color_hex == color_hex:
+            return
+        note.color_hex = color_hex
+        self._dirty.add(note_id)
+        self._last_edit_time[note_id] = time.monotonic()
+        self._save_notes_to_disk()
+        self._refresh_window(note_id)
+        self._refresh_manager_if_open()
+        if self.sync.is_authenticated:
+            self._sync_debounce.start()
 
     def _on_manager_accepted(self, dlg):
         self._visibility = dlg.result_visibility
@@ -2051,6 +1736,7 @@ class AppController(QObject):
         dlg = getattr(self, "_manager_dlg", None)
         if dlg is not None:
             dlg.refresh(self._notes, self._visibility)
+            self._update_dashboard_sync_state()
 
     def _apply_visibility(self):
         for note_id, note in self._notes.items():
@@ -2754,7 +2440,13 @@ class AppController(QObject):
         """
         win = self.windows.get(note_id)
         note = self._notes.get(note_id)
-        if not win or not note:
+        if not note:
+            return
+        if not win:
+            # Dashboard-only edits need no floating-widget catch-up. Leaving
+            # this marker set would hold their baseline indefinitely.
+            self._pending_widget_refresh.discard(note_id)
+            self._refresh_manager_if_open()
             return
         if self._is_note_busy(note_id):
             QTimer.singleShot(
@@ -2763,6 +2455,7 @@ class AppController(QObject):
             )
             return
         self._refresh_window(note_id)
+        self._refresh_manager_if_open()
 
     def _add_window_for_note(self, note: KeepNote):
         if note.id in self.windows:
@@ -2808,7 +2501,7 @@ class AppController(QObject):
                 QTimer.singleShot(0, _restore_scroll)
             win._is_list = note.is_list
             win.set_dark_mode(note.dark_mode)
-            if note.is_list and note.list_items:
+            if note.is_list:
                 # Real ChecklistEditor path — reflect remote items.
                 win.set_list_items(note.list_items)
                 win.text_edit.setVisible(False)
@@ -3074,6 +2767,12 @@ class AppController(QObject):
         dlg.exec()
 
     def _quit(self):
+        manager = getattr(self, "_manager_dlg", None)
+        editor = getattr(manager, "_editor", None)
+        if editor is not None:
+            editor.reject()
+            if editor.isVisible():
+                return
         # Save all window geometry
         for win in self.windows.values():
             win.save_geometry()

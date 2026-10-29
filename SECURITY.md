@@ -88,13 +88,43 @@ with the existing valid-cursor checks. Explicit null, wrong types, missing or
 invalid cursor, and incomplete/ambiguous omitted-node pages still fail closed.
 All-page rollback, pagination bounds, stale-state protection and write
 acknowledgment validation are unchanged. No write-acknowledgment requirement
-was relaxed. The corrected import still needs a manual app retry.
+was relaxed. Installed private.6 passed a fresh app read/decode check, with writes
+OFF, and the user confirmed notes appeared. Live cloud writes remain unverified.
 
 Failed reads no longer emit a fake successful empty notebook. They retain
 local data, pause writes and show a deduplicated non-modal notification. The
 note manager opens once after a verified interactive/first uncached download;
 new Google notes remain hidden as floating windows until selected by the user.
 No existing local notes are deleted to make room for an import.
+
+## Native dashboard
+
+The Keep-style dashboard is native Qt, not an authenticated website or a script
+bridge. Its icons are locally drawn vectors and its font is installed locally.
+Card titles, bodies, and labels use literal plain text; previews do not render
+HTML, fetch images, or open links. The draft editor reuses `NoteTextEdit` and
+`LocalNoteDocument`, retaining resource blocking and disabled external links.
+
+Opening, searching, filtering, resizing or changing dashboard layout is not a
+note edit. Dark card display never rewrites wire colors. Desktop pins only set
+local visibility/window geometry and always-on-top state, not Keep pin metadata.
+Existing desktop visibility and per-note floating themes are retained.
+
+Drafts commit only on Save. Only edited fields are committed; title-only edits
+retain the original body/StyledDoc. Changed body fields invalidate the cached
+StyledDoc as floating-note edits do. Before committing, the controller compares
+touched fields with the draft's original snapshot and refuses concurrent edits
+to those fields. The draft remains open on conflict, removal/ID change, or secure
+storage failure. Existing model object identity is preserved for in-flight sync
+references. Dashboard-only notes do not retain a nonexistent floating-widget
+baseline hold after a merge. Untouched drafts create no empty note. Quit asks
+before discarding unsaved drafts.
+
+Delete confirmation does not optimistically remove a card: the existing guarded
+delete path must confirm success. Remote note-type conversion remains blocked.
+Archive/Trash browsing and label editing are intentionally not implemented; their
+look must not imply safe write support. No endpoint, token-retention, consent,
+write opt-in, recovery or write-acknowledgment policy was relaxed for this UI.
 
 The auth transport only POSTs to `https://android.clients.google.com/auth`, with
 TLS >=1.2, certificate and hostname validation, a pinned CA-bundle dependency,
