@@ -126,3 +126,15 @@ def test_failed_recovery_blocks_incoming_overwrite_and_retains_old_baseline(tmp_
     assert controller._notes["1.test"].text == "previous local content"
     assert "1.test" in controller._dirty
     assert controller.sync.baselines["1.test"]["text"] == "previous local content"
+
+
+def test_private_installer_is_per_user_and_does_not_auto_launch_silently():
+    from pathlib import Path
+    script = (Path(__file__).resolve().parents[1] / "installer.iss").read_text(encoding="utf-8")
+    assert 'https://github.com/TylerBuza/Keep-Desktop' in script
+    assert 'DefaultDirName={localappdata}\\Programs\\{#MyAppName}' in script
+    assert 'PrivilegesRequired=lowest' in script
+    assert 'PrivilegesRequiredOverridesAllowed=' not in script
+    assert 'skipifsilent' in script
+    assert '8B1A7C4E-3F2D-4A91-9B2E-2A4D5E6F7A8B' not in script
+    assert 'Type: filesandordirs; Name: "{app}"' not in script

@@ -10,21 +10,26 @@
 #endif
 
 #define MyAppName        "KeepDesktop"
-#define MyAppPublisher   "LukeCGG"
-#define MyAppURL         "https://github.com/LukeCGG/Keep-Desktop"
+#define MyAppPublisher   "TylerBuza (private build; upstream LukeCGG)"
+#define MyAppURL         "https://github.com/TylerBuza/Keep-Desktop"
 #define MyAppExeName     "KeepDesktop.exe"
 
+#ifndef MyAppNumericVersion
+  #define MyAppNumericVersion "2.2.0.0"
+#endif
+
 [Setup]
-; Stable AppId — DO NOT change between versions, or upgrades become side-by-side installs
-AppId={{8B1A7C4E-3F2D-4A91-9B2E-2A4D5E6F7A8B}}
+; Private-build identity; never register as an upgrade to the upstream installer.
+AppId={{E7720D5B-8CF2-4C7A-A6DA-6CA4B9A6A4DD}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppNumericVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
 AppUpdatesURL={#MyAppURL}/releases
-DefaultDirName={autopf}\{#MyAppName}
+DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 LicenseFile=LICENSE
@@ -34,7 +39,6 @@ Compression=lzma2/ultra
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ; Allow updates to overwrite the running app
@@ -55,6 +59,7 @@ Name: "startup";     Description: "Start {#MyAppName} when Windows starts"; Grou
 Source: "dist\KeepDesktop\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "LICENSE";            DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md";          DestDir: "{app}"; Flags: ignoreversion
+Source: "SECURITY.md";        DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}";              Filename: "{app}\{#MyAppExeName}"
@@ -67,10 +72,8 @@ Name: "{userstartup}\{#MyAppName}";        Filename: "{app}\{#MyAppExeName}"; Ta
 ; postinstall -> run as the very last step
 ; runasoriginaluser -> if installer was elevated, launch the app as the
 ;                      logged-in user so it doesn't run elevated forever
-; NOTE: deliberately NOT using `skipifsilent` so the auto-updater
-; (which runs us with /SILENT) still relaunches the new build.
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall runasoriginaluser
+; Unattended installs must not open a live Google login session.
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall runasoriginaluser skipifsilent
 
-[UninstallDelete]
-; Leave user data (%APPDATA%\KeepDesktop) intact on uninstall — users can wipe it manually
-Type: filesandordirs; Name: "{app}"
+; Uninstall removes installer-owned files only. Leave user note data and any
+; user-added files intact; never recursively delete the entire install folder.
