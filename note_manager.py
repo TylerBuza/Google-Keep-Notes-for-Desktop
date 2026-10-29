@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 
 from config import KEEP_COLORS
 from app_icon import make_icon
+from keep_brand import keep_logo
 from dashboard_theme import STYLE, BACKGROUND, MUTED, ACCENT, card_color, icon
 from note_window import NoteTextEdit, ChecklistEditor, FormattingToolbar
 
@@ -180,6 +181,9 @@ class NoteCard(QFrame):
         self.title.setStyleSheet("font-size: 16px; font-weight: 500;")
         self.title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         top.addWidget(self.title, 1)
+        # A hidden (untitled) QLabel contributes no stretch. Keep an expanding
+        # spacer even then, rather than centering the lone pin in the row.
+        top.addStretch()
         self.pin = icon_button("pin", "Pin to top of Keep", self)
         self.pin.clicked.connect(lambda: self.pin_requested.emit(self.note_id))
         top.addWidget(self.pin, 0, Qt.AlignmentFlag.AlignTop)
@@ -343,11 +347,14 @@ class NoteManagerDialog(QDialog):
         menu.clicked.connect(lambda: self._sidebar.setVisible(not self._sidebar.isVisible()))
         bar.addWidget(menu)
         brand_icon = QLabel()
-        brand_icon.setPixmap(make_icon().pixmap(36, 36))
+        brand_icon.setObjectName("keepLogo")
+        brand_icon.setAccessibleName("Google Keep logo")
+        brand_icon.setPixmap(keep_logo().pixmap(QSize(36, 36), self.devicePixelRatioF()))
         bar.addWidget(brand_icon)
-        brand = plain_label("Keep")
+        brand = plain_label("Keep Desktop")
+        brand.setObjectName("brandLabel")
         brand.setStyleSheet("font-size: 23px;")
-        brand.setMinimumWidth(80)
+        brand.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
         bar.addWidget(brand)
         search_box = QFrame()
         search_box.setObjectName("searchBox")

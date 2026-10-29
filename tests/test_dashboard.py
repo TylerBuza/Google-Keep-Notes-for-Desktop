@@ -13,7 +13,7 @@ from PySide6.QtTest import QTest
 from app_controller import AppController
 from dashboard_theme import BACKGROUND, card_color, icon
 from native_resources import LocalNoteDocument
-from note_manager import NoteManagerDialog, NoteEditorDialog, edit_snapshot
+from note_manager import NoteManagerDialog, NoteEditorDialog, NoteCard, edit_snapshot
 from note_model import KeepNote
 
 
@@ -55,6 +55,52 @@ def test_theme_does_not_mutate_cloud_colors_or_desktop_preferences(dashboard, no
 def test_keep_pin_sections_and_sort_order(dashboard):
     assert [card.note_id for card in dashboard._pinned_grid.cards] == ["1.a"]
     assert [card.note_id for card in dashboard._others_grid.cards] == ["2.b", "3.c"]
+
+
+def test_header_uses_keep_desktop_and_bundled_official_logo(dashboard):
+    import base64
+    import hashlib
+    from PySide6.QtWidgets import QLabel
+    from keep_brand import _LOGO_PNG, keep_logo
+    assert dashboard.findChild(QLabel, "brandLabel").text() == "Keep Desktop"
+    logo = dashboard.findChild(QLabel, "keepLogo")
+    assert not logo.pixmap().isNull()
+    assert not keep_logo().isNull()
+    data = base64.b64decode(_LOGO_PNG)
+    assert hashlib.sha256(data).hexdigest() == "c95da1279834351ba206716611597a5d9b3a6c0df8fa79ad4f5007e4151fc857"
+
+
+@pytest.mark.parametrize("title", ["", "Title", "A long title that wraps across several lines of a card"])
+@pytest.mark.parametrize("width", [240, 360, 600])
+def test_card_pin_stays_in_upper_right_even_without_title(qapp, title, width):
+    note = KeepNote(id="synthetic-corner", title=title, text="Fictional note body")
+    card = NoteCard(note, False)
+    try:
+        card.resize(width, card.heightForWidth(width))
+        card.show()
+        qapp.processEvents()
+        assert card.pin.geometry().right() == card.contentsRect().right() - card.layout().contentsMargins().right()
+        assert card.pin.y() == card.contentsRect().top() + card.layout().contentsMargins().top()
+        assert card.pin.x() > card.width() / 2
+    finally:
+        card.close()
+        card.deleteLater()
+
+
+def test_pin_corner_survives_title_changes_filtering_and_layout_switch(dashboard, notes, qapp):
+    note = notes["1.a"]
+    card = dashboard._cards[note.id]
+    for title in ("", "A title again", ""):
+        note.title = title
+        dashboard.refresh(notes, dashboard.result_visibility)
+        dashboard._toggle_layout()
+        dashboard._search_edit.setText("does not match")
+        dashboard._search_edit.clear()
+        qapp.processEvents()
+        qapp.processEvents()
+        assert dashboard._cards[note.id] is card
+        assert card.pin.geometry().right() == card.contentsRect().right() - card.layout().contentsMargins().right()
+        assert card.pin.y() == card.contentsRect().top() + card.layout().contentsMargins().top()
 
 
 @pytest.mark.parametrize("query,expected", [("shopping", ["2.b"]), ("tea", ["2.b"]),

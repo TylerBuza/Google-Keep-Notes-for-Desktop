@@ -32,7 +32,7 @@ def main():
                                  {"text": "Clear the desk", "checked": True}]),
             KeepNote(id="demo-3", title="Weekend plans", color_hex="#CCFF90",
                      text="A walk, a good book,\nand absolutely no alarms."),
-            KeepNote(id="demo-4", title="Something worth remembering", labels=["Ideas"],
+            KeepNote(id="demo-4", title="", labels=["Ideas"],
                      color_hex="#FFFFFF", text="You don’t have to do it all today."),
             KeepNote(id="demo-5", title="Small improvements", color_hex="#FDCFE8",
                      text="Less clutter.\nMore breathing room.\nA place for every idea."),

@@ -66,6 +66,10 @@ Run this copy from source using the commands below. Upstream installers do
 Open **Manage notes** from the tray for the native dark dashboard: searchable
 masonry cards, Pinned/Other sections, grid/list view, note colors, and a separate
 **Desktop pins** view. No website, remote fonts, or linked images are loaded.
+The **Keep Desktop** header uses Google's original Keep logo, bundled locally;
+the app retains its distinct K icon in the tray/taskbar. Google Keep and its logo
+are Google's trademarks. This unofficial app is not affiliated with or endorsed
+by Google. Asset provenance is recorded in `keep_brand.py`.
 
 - Click a card to edit a draft. **Save** commits locally; **Cancel** confirms
   before discarding changes. If that note changed during editing, conflicting

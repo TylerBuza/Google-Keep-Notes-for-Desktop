@@ -100,7 +100,10 @@ No existing local notes are deleted to make room for an import.
 ## Native dashboard
 
 The Keep-style dashboard is native Qt, not an authenticated website or a script
-bridge. Its icons are locally drawn vectors and its font is installed locally.
+bridge. Its control icons are locally drawn vectors and its font is installed
+locally. The header uses an unmodified official Google Keep PNG embedded in
+`keep_brand.py`, with its source URL and SHA256 recorded; it is not downloaded
+at runtime. Tray/taskbar branding remains the app's distinct K icon.
 Card titles, bodies, and labels use literal plain text; previews do not render
 HTML, fetch images, or open links. The draft editor reuses `NoteTextEdit` and
 `LocalNoteDocument`, retaining resource blocking and disabled external links.
