@@ -14,6 +14,9 @@ Each reviewed public release includes:
 - `security-frozen-inventory.json`: required security modules present and legacy
   authentication modules excluded from the frozen application.
 - `security-fonts.json`: packaged font hashes and license-notice checks.
+- `security-binary-smoke.json`: the exact installer installed and launched with
+  isolated offline data on a disposable Windows runner, including an installed
+  EXE/scan-input hash comparison and a DPAPI-cache check.
 - Antivirus report summaries/permalinks for the exact installer and packaged
   application EXE, when those analyses have completed. The release notes name
   any missing, pending, unsupported, or detected result explicitly.
@@ -75,8 +78,10 @@ before freezing rather than shipping the development sentinel `0.0.0`.
 5. Wait for the analyses, record totals, detections and permanent report links
    beside the SHA256. Inspect actual findings; stop to investigate rather than
    modifying the binary to evade detection. Pending analysis is not a pass.
-6. Perform an isolated offline binary smoke test. Do not use a real account for
-   tests or enable cloud writes as part of release preparation.
+6. Dispatch `verify-release.yml` with the successful build run ID, exact source
+   SHA and version. It installs and starts that artifact on a disposable Windows
+   runner using isolated offline data, then produces `security-binary-smoke.json`.
+   Do not use a real account or enable cloud writes as part of release testing.
 7. Create the release against the exact build commit, attach installer, hashes,
    verification reports, scan summaries and release notes, then publish. Provide
    corresponding source through that exact tag, retaining LICENSE and CREDITS.

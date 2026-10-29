@@ -1,0 +1,101 @@
+name: Verify release binary offline
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Build & Release run ID
+        required: true
+      commit:
+        description: Exact 40-character source SHA used by that build
+        required: true
+      version:
+        description: Exact installer version
+        required: true
+        default: '2.3.0'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    steps:
+      - name: Verify selected build identity
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_RUN: ${{ inputs.run_id }}
+          BUILD_COMMIT: ${{ inputs.commit }}
+          BUILD_VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:BUILD_RUN -notmatch '^\d+$' -or $env:BUILD_COMMIT -notmatch '^[a-f0-9]{40}$' -or $env:BUILD_VERSION -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw 'Invalid build identity.' }
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:BUILD_RUN" | ConvertFrom-Json
+          if ($run.status -ne 'completed' -or $run.conclusion -ne 'success' -or $run.head_sha -ne $env:BUILD_COMMIT -or $run.path -ne '.github/workflows/release.yml') { throw 'Build identity or result mismatch.' }
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: KeepDesktop-Setup
+          path: artifact
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify and run exact binary with isolated offline data
+        shell: pwsh
+        env:
+          BUILD_RUN: ${{ inputs.run_id }}
+          BUILD_COMMIT: ${{ inputs.commit }}
+          BUILD_VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = (Resolve-Path artifact).Path
+          $setup = Join-Path $root "Google-Keep-Notes-for-Desktop-Setup-$env:BUILD_VERSION.exe"
+          $expected = ((Get-Content ($setup + '.sha256') -Raw).Trim() -split '\s+')[0]
+          $installerHash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($expected -notmatch '^[a-fA-F0-9]{64}$' -or $installerHash -ne $expected) { throw 'Installer checksum mismatch.' }
+          $frozen = Get-Content (Join-Path $root 'security-frozen-inventory.json') -Raw | ConvertFrom-Json
+          $fonts = Get-Content (Join-Path $root 'security-fonts.json') -Raw | ConvertFrom-Json
+          $audit = Get-Content (Join-Path $root 'security-build-audit.json') -Raw | ConvertFrom-Json
+          if (-not $frozen.legacy_auth_modules_absent -or -not $frozen.required_security_modules_present) { throw 'Frozen security check failed.' }
+          if ($fonts.font_count -ne 7 -or -not $fonts.sha256_verified -or -not $fonts.licenses_present) { throw 'Font verification failed.' }
+          if (-not $audit.dependencies -or @($audit.dependencies | Where-Object { $_.vulns.Count -gt 0 -or $_.skip_reason }).Count -gt 0) { throw 'Dependency audit failed.' }
+          # The installer runs only on a disposable runner, never the user's PC.
+          $app = Join-Path $env:RUNNER_TEMP 'release-app'
+          $install = Start-Process $setup -ArgumentList @('/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOCLOSEAPPLICATIONS', '/TASKS=""', ('/DIR="' + $app + '"')) -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw 'Installer failed.' }
+          $exe = Join-Path $app 'KeepDesktop.exe'
+          $appHash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $scanHash = (Get-FileHash (Join-Path $root 'scan-inputs/KeepDesktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($appHash -ne $scanHash) { throw 'Installed and scan-input EXEs differ.' }
+          if (-not (Test-Path (Join-Path $app 'CREDITS.md')) -or -not (Test-Path (Join-Path $app 'LICENSE'))) { throw 'License or credits missing.' }
+          $data = Join-Path $env:RUNNER_TEMP 'release-smoke-data'
+          $state = Join-Path $data 'KeepDesktop'
+          New-Item -ItemType Directory -Path $state -Force | Out-Null
+          '{"seen_login":true,"start_offline":true,"cloud_writes_enabled":false,"autostart":false,"remember_google_account":false,"experimental_auth_consent":0}' | Set-Content (Join-Path $state 'config.json') -Encoding ascii
+          $start = [System.Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = $exe
+          $start.WorkingDirectory = $app
+          $start.UseShellExecute = $false
+          $start.CreateNoWindow = $true
+          $start.EnvironmentVariables['APPDATA'] = $data
+          $start.EnvironmentVariables['QT_QPA_PLATFORM'] = 'offscreen'
+          $process = [System.Diagnostics.Process]::Start($start)
+          try {
+            if ($process.WaitForExit(10000)) { throw "App exited during offline smoke test ($($process.ExitCode))." }
+            $cache = [System.IO.File]::ReadAllBytes((Join-Path $state 'notes.dat'))
+            if (-not [System.Text.Encoding]::ASCII.GetString($cache).StartsWith('KeepDesktop-DPAPI-v1')) { throw 'Note cache is not DPAPI protected.' }
+            if (Test-Path (Join-Path $state 'keep_token.dat')) { throw 'Offline smoke unexpectedly stored a credential.' }
+          } finally {
+            # Stop only the isolated child process started by this disposable job.
+            if (-not $process.HasExited) { $process.Kill(); $null = $process.WaitForExit(5000) }
+            $process.Dispose()
+          }
+          [ordered]@{ version = $env:BUILD_VERSION; source_commit = $env:BUILD_COMMIT; build_run_id = $env:BUILD_RUN; installer_sha256 = $installerHash; application_sha256 = $appHash; isolated_offline_binary_smoke = 'passed'; installed_exe_matches_scan_input = $true; encrypted_cache_verified = $true; credentials_used = $false; personal_notes_used = $false; credits_and_license_present = $true } | ConvertTo-Json | Set-Content security-binary-smoke.json -Encoding utf8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-binary-smoke
+          path: security-binary-smoke.json

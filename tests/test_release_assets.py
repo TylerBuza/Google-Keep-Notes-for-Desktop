@@ -57,6 +57,17 @@ def test_render_samples_are_fictional_models_not_an_installed_cache():
     assert {note.title for note in notes} >= {"A little inspiration", "This week", "Weekend plans"}
 
 
+def test_binary_review_is_disposable_offline_and_checks_exact_installed_bytes():
+    workflow = (ROOT / ".github/workflows/verify-release.yml").read_text(encoding="utf-8")
+    assert "runs-on: windows-latest" in workflow
+    assert "$appHash -ne $scanHash" in workflow
+    assert '"start_offline":true' in workflow
+    assert '"cloud_writes_enabled":false' in workflow
+    assert "KeepDesktop-DPAPI-v1" in workflow
+    assert "security-binary-smoke.json" in workflow
+    assert "contents: write" not in workflow
+
+
 def test_publication_retains_credit_and_documents_reviewed_scanner_findings():
     credit = (ROOT / "CREDITS.md").read_text(encoding="utf-8")
     review = (ROOT / "security/PUBLICATION-REVIEW.md").read_text(encoding="utf-8")
