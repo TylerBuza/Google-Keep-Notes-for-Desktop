@@ -1,6 +1,7 @@
 """Shared application icon — the yellow rounded "K" sticky note.
 
-Used by the tray, all windows/dialogs, and (via icon.ico) the Windows EXE.
+Used by native windows/dialogs and (via icon.ico) the Windows EXE/taskbar.
+The dashboard header and system tray use the bundled official Keep artwork.
 """
 
 from PySide6.QtCore import Qt, QRectF, QPointF

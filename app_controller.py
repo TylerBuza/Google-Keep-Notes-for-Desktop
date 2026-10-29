@@ -29,7 +29,7 @@ from config import (
     load_json, save_json, APP_NAME, APP_VERSION, GITHUB_REPO,
     load_notes, save_notes, AUTO_UPDATE_ENABLED,
 )
-from app_icon import make_icon as _make_icon
+from keep_brand import keep_logo
 import note_window
 from note_window import NoteWindow
 from note_model import KeepNote
@@ -872,7 +872,7 @@ class AppController(QObject):
         # Load persisted notes from disk
         self._load_notes_from_disk()
 
-        self.tray = QSystemTrayIcon(_make_icon())
+        self.tray = QSystemTrayIcon(keep_logo())
         self.tray.setToolTip("KeepDesktop")
         self.tray.activated.connect(self._on_tray_activated)
         self._build_tray_menu()

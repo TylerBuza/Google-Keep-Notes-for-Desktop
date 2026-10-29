@@ -622,6 +622,8 @@ def test_full_offline_controller_dashboard_edit_and_float_flow(qapp, monkeypatch
     monkeypatch.setattr("note_window.set_position", MagicMock())
     ctl = AppController()
     try:
+        from keep_brand import keep_logo
+        assert ctl.tray.icon().cacheKey() == keep_logo().cacheKey()
         ctl._show_note_manager()
         ctl._open_dashboard_editor()
         qapp.processEvents()

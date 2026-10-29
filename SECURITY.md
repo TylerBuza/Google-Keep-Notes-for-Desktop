@@ -106,7 +106,8 @@ there is no system-wide font install or runtime font download. CI verifies the
 frozen assets and included license/trademark notices. The header uses an
 unmodified official Google Keep PNG embedded in
 `keep_brand.py`, with its source URL and SHA256 recorded; it is not downloaded
-at runtime. Tray/taskbar branding remains the app's distinct K icon.
+at runtime. The tray uses that same bundled artwork; the taskbar retains the
+app's distinct K icon. No icon lookup or download occurs at startup.
 Card titles, bodies, and labels use literal plain text; previews do not render
 HTML, fetch images, or open links. The draft editor reuses `NoteTextEdit` and
 `LocalNoteDocument`, retaining resource blocking and disabled external links.
