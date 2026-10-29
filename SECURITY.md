@@ -113,12 +113,17 @@ note edit. Dark card display never rewrites wire colors. Desktop pins only set
 local visibility/window geometry and always-on-top state, not Keep pin metadata.
 Existing desktop visibility and per-note floating themes are retained.
 
-Drafts commit only on Save. Only edited fields are committed; title-only edits
+Drafts commit only on explicit Save (the button or navigation prompt). Only
+edited fields are committed; title-only edits
 retain the original body/StyledDoc. Changed body fields invalidate the cached
 StyledDoc as floating-note edits do. Before committing, the controller compares
 touched fields with the draft's original snapshot and refuses concurrent edits
 to those fields. The draft remains open on conflict, removal/ID change, or secure
-storage failure. Existing model object identity is preserved for in-flight sync
+storage failure. The header's Home button clears search and returns to Notes;
+leaving an edited bubble offers Save/Discard/Cancel, with Save using the same
+guarded commit path. A bubble is non-modal so Home stays accessible; only one
+draft can be open, and closing the dashboard cannot silently hide an unsaved
+draft. Existing model object identity is preserved for in-flight sync
 references. Dashboard-only notes do not retain a nonexistent floating-widget
 baseline hold after a merge. Untouched drafts create no empty note. Quit asks
 before discarding unsaved drafts.

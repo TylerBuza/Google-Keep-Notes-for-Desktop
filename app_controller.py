@@ -1627,7 +1627,7 @@ class AppController(QObject):
             editor.deleteLater()
 
         editor.finished.connect(finished)
-        editor.open()
+        editor.show()
 
     def _save_dashboard_edit(self, editor, changes):
         """Commit a draft without overwriting an edit or pull that arrived meanwhile."""

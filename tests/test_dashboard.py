@@ -60,14 +60,108 @@ def test_keep_pin_sections_and_sort_order(dashboard):
 def test_header_uses_keep_desktop_and_bundled_official_logo(dashboard):
     import base64
     import hashlib
-    from PySide6.QtWidgets import QLabel
+    from PySide6.QtWidgets import QPushButton
     from keep_brand import _LOGO_PNG, keep_logo
-    assert dashboard.findChild(QLabel, "brandLabel").text() == "Keep Desktop"
-    logo = dashboard.findChild(QLabel, "keepLogo")
-    assert not logo.pixmap().isNull()
+    brand = dashboard.findChild(QPushButton, "brandHome")
+    assert brand.text() == "Keep Desktop"
+    assert not brand.icon().isNull()
     assert not keep_logo().isNull()
     data = base64.b64decode(_LOGO_PNG)
     assert hashlib.sha256(data).hexdigest() == "c95da1279834351ba206716611597a5d9b3a6c0df8fa79ad4f5007e4151fc857"
+
+
+@pytest.mark.parametrize("view", ["desktop", "label:Ideas", "settings", "search"])
+@pytest.mark.parametrize("click_icon", [False, True])
+def test_logo_and_brand_text_return_home_from_every_page(dashboard, view, click_icon, qapp):
+    if view == "settings":
+        dashboard._show_settings()
+    elif view == "search":
+        dashboard._search_edit.setText("Shopping")
+    else:
+        dashboard._set_view(view)
+    before = dict(dashboard.result_visibility)
+    pos = QPoint(18, dashboard._home_button.height() // 2) if click_icon else QPoint(
+        dashboard._home_button.width() - 20, dashboard._home_button.height() // 2)
+    QTest.mouseClick(dashboard._home_button, Qt.MouseButton.LeftButton, pos=pos)
+    qapp.processEvents()
+    assert dashboard._view == "notes"
+    assert dashboard._pages.currentIndex() == 0
+    assert dashboard._search_edit.text() == ""
+    assert displayed(dashboard) == ["1.a", "2.b", "3.c"]
+    assert dashboard.result_visibility == before
+
+
+@pytest.mark.parametrize("decision", ["Save", "Discard", "Cancel", "Save fails"])
+def test_home_leaves_note_bubble_without_losing_unsaved_work(dashboard, qapp, monkeypatch, decision):
+    from PySide6.QtWidgets import QMessageBox
+    dashboard._set_view("desktop")
+    editor = NoteEditorDialog(dashboard._all_notes["1.a"], parent=dashboard)
+    dashboard._editor = editor
+    editor.finished.connect(lambda result: setattr(dashboard, "_editor", None))
+    saved = MagicMock()
+    editor.save_requested.connect(saved)
+    if decision == "Save":
+        editor.save_requested.connect(lambda changes: editor.accept())
+    elif decision == "Save fails":
+        editor.save_requested.connect(lambda changes: editor.show_error("Synthetic save failure"))
+    editor.show()
+    editor.title_edit.setText("Synthetic draft")
+    monkeypatch.setattr("note_manager.QMessageBox.question", lambda *args:
+        getattr(QMessageBox.StandardButton, "Save" if decision == "Save fails" else decision))
+    try:
+        assert editor.windowModality() == Qt.WindowModality.NonModal
+        QTest.mouseClick(dashboard._home_button, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        leave = decision in ("Save", "Discard")
+        assert editor.isVisible() is not leave
+        assert dashboard._view == ("notes" if leave else "desktop")
+        assert dashboard._all_notes["1.a"].title == "Pinned"
+        if decision.startswith("Save"):
+            saved.assert_called_once_with({"title": "Synthetic draft"})
+        else:
+            saved.assert_not_called()
+        if decision == "Save fails":
+            assert not editor.error.isHidden()
+    finally:
+        editor.accept()
+        editor.deleteLater()
+
+
+def test_home_closes_clean_bubble_without_prompt_or_save(dashboard, monkeypatch):
+    editor = NoteEditorDialog(dashboard._all_notes["1.a"], parent=dashboard)
+    dashboard._editor = editor
+    editor.finished.connect(lambda result: setattr(dashboard, "_editor", None))
+    saved = MagicMock()
+    prompt = MagicMock()
+    monkeypatch.setattr("note_manager.QMessageBox.question", prompt)
+    editor.save_requested.connect(saved)
+    editor.show()
+    try:
+        dashboard._home_button.click()
+        assert not editor.isVisible()
+        assert dashboard._editor is None
+        prompt.assert_not_called()
+        saved.assert_not_called()
+    finally:
+        editor.accept()
+        editor.deleteLater()
+
+
+def test_closing_dashboard_cannot_hide_an_unsaved_bubble(dashboard, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    editor = NoteEditorDialog(dashboard._all_notes["1.a"], parent=dashboard)
+    dashboard._editor = editor
+    editor.finished.connect(lambda result: setattr(dashboard, "_editor", None))
+    editor.show()
+    editor.title_edit.setText("Keep this draft")
+    monkeypatch.setattr("note_manager.QMessageBox.question", lambda *args: QMessageBox.StandardButton.Cancel)
+    try:
+        dashboard.close()
+        assert dashboard.isVisible()
+        assert editor.isVisible()
+    finally:
+        editor.accept()
+        editor.deleteLater()
 
 
 @pytest.mark.parametrize("title", ["", "Title", "A long title that wraps across several lines of a card"])
@@ -480,8 +574,12 @@ def test_full_offline_controller_dashboard_edit_and_float_flow(qapp, monkeypatch
         ctl._open_dashboard_editor(note.id)
         editor = ctl._manager_dlg._editor
         editor.title_edit.setText("Edited from dashboard")
-        editor.save_requested.emit(editor.changes())
+        from PySide6.QtWidgets import QMessageBox
+        monkeypatch.setattr("note_manager.QMessageBox.question", lambda *args: QMessageBox.StandardButton.Save)
+        ctl._manager_dlg._home_button.click()
         qapp.processEvents()
+        assert ctl._manager_dlg._editor is None
+        assert ctl._manager_dlg._view == "notes"
         assert win.get_title() == "Edited from dashboard"
         assert win.get_text() == "Synthetic text"
         assert ctl._notes[note.id].text == "Synthetic text"

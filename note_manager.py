@@ -53,7 +53,9 @@ class NoteEditorDialog(QDialog):
         self.setStyleSheet(STYLE)
         self.setWindowTitle("New note" if is_new else "Edit note")
         self.setWindowIcon(make_icon())
-        self.setWindowModality(Qt.WindowModality.WindowModal)
+        # Keep the dashboard's Home button reachable while a draft is open.
+        # The controller still allows just one draft and validates its snapshot.
+        self.setWindowModality(Qt.WindowModality.NonModal)
         self.resize(600, 460)
         self.setMinimumSize(380, 300)
         self.note_id = note.id
@@ -144,6 +146,25 @@ class NoteEditorDialog(QDialog):
             if answer != QMessageBox.StandardButton.Discard:
                 return
         super().reject()
+
+    def close_for_navigation(self):
+        """Leave a bubble only after an explicit save/discard decision."""
+        changes = self.changes()
+        if changes:
+            answer = QMessageBox.question(self, "Leave this note?", "Save your changes before leaving this note?",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard |
+                QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Save)
+            if answer == QMessageBox.StandardButton.Save:
+                self.save_requested.emit(changes)
+                # A failed secure save or concurrent-edit conflict keeps the
+                # draft visible. Do not navigate away or suppress that error.
+                return not self.isVisible()
+            if answer != QMessageBox.StandardButton.Discard:
+                self.raise_()
+                self.activateWindow()
+                return False
+        super().reject()  # Clean draft or explicitly discarded, no second prompt.
+        return True
 
 
 class _NoWheelComboBox(QComboBox):
@@ -346,15 +367,18 @@ class NoteManagerDialog(QDialog):
         menu = icon_button("menu", "Toggle navigation")
         menu.clicked.connect(lambda: self._sidebar.setVisible(not self._sidebar.isVisible()))
         bar.addWidget(menu)
-        brand_icon = QLabel()
-        brand_icon.setObjectName("keepLogo")
-        brand_icon.setAccessibleName("Google Keep logo")
-        brand_icon.setPixmap(keep_logo().pixmap(QSize(36, 36), self.devicePixelRatioF()))
-        bar.addWidget(brand_icon)
-        brand = plain_label("Keep Desktop")
-        brand.setObjectName("brandLabel")
-        brand.setStyleSheet("font-size: 23px;")
+        brand = QPushButton("Keep Desktop")
+        brand.setObjectName("brandHome")
+        brand.setAutoDefault(False)
+        brand.setIcon(keep_logo())
+        brand.setIconSize(QSize(36, 36))
+        brand.setStyleSheet("QPushButton { font-size: 23px; padding: 0 6px 0 0; }")
         brand.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
+        brand.setCursor(Qt.CursorShape.PointingHandCursor)
+        brand.setToolTip("Back to Notes")
+        brand.setAccessibleName("Keep Desktop — back to Notes")
+        brand.clicked.connect(self._return_to_notes)
+        self._home_button = brand
         bar.addWidget(brand)
         search_box = QFrame()
         search_box.setObjectName("searchBox")
@@ -411,6 +435,7 @@ class NoteManagerDialog(QDialog):
         page = QVBoxLayout(notes_page)
         page.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
+        self._notes_scroll = scroll
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_host = QWidget()
@@ -528,6 +553,22 @@ class NoteManagerDialog(QDialog):
 
     def _show_settings(self):
         self._pages.setCurrentIndex(1 - self._pages.currentIndex())
+
+    def _return_to_notes(self):
+        if self._editor is not None and not self._editor.close_for_navigation():
+            return
+        self._search_edit.blockSignals(True)
+        self._search_edit.clear()
+        self._search_edit.blockSignals(False)
+        self._search_text = ""
+        self._set_view("notes")
+        self._notes_scroll.verticalScrollBar().setValue(0)
+
+    def reject(self):
+        # Non-modal drafts must not disappear behind a closed dashboard.
+        if self._editor is not None and not self._editor.close_for_navigation():
+            return
+        super().reject()
 
     def _set_view(self, view):
         self._view = view
