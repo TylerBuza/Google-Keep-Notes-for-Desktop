@@ -502,7 +502,7 @@ class FormattingToolbar(QWidget):
         qss = (
             "QPushButton {"
             f"  border: none; border-radius: 3px; color: {color};"
-            "  background: transparent;"
+            "  background: transparent; padding: 0;"
             "}"
             f"QPushButton:hover {{ background: {hover}; }}"
             f"QPushButton:checked {{ background: {checked}; }}"

@@ -46,15 +46,17 @@ class NoteEditorDialog(QDialog):
     """Draft-only editor. The controller validates concurrent edits before saving."""
 
     save_requested = Signal(object)
+    dismiss_requested = Signal()
 
-    def __init__(self, note, *, is_new=False, parent=None):
+    def __init__(self, note, *, is_new=False, embedded=False, parent=None):
         super().__init__(parent)
+        self._embedded = embedded
+        if embedded:
+            self.setWindowFlags(Qt.WindowType.Widget)
         self.setObjectName("noteEditor")
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(STYLE + "QDialog#noteEditor { border: 1px solid #5f6368; border-radius: 8px; }")
         self.setWindowTitle("New note" if is_new else "Edit note")
         self.setWindowIcon(make_icon())
-        # Keep the dashboard's Home button reachable while a draft is open.
-        # The controller still allows just one draft and validates its snapshot.
         self.setWindowModality(Qt.WindowModality.NonModal)
         self.resize(600, 460)
         self.setMinimumSize(380, 300)
@@ -104,16 +106,20 @@ class NoteEditorDialog(QDialog):
         self.error.hide()
         layout.addWidget(self.error)
         footer = QHBoxLayout()
-        hint = plain_label("Save stores locally · cloud writes require separate opt-in")
+        hint = plain_label("Click outside or Close to save locally · cloud writes require opt-in"
+                           if embedded else "Save stores locally · cloud writes require separate opt-in")
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
         footer.addWidget(hint, 1)
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
         footer.addWidget(cancel)
-        save = QPushButton("Save")
+        save = QPushButton("Close" if embedded else "Save")
         save.setDefault(True)
-        save.clicked.connect(lambda: self.save_requested.emit(self.changes()))
+        if embedded:
+            save.clicked.connect(self.dismiss_requested.emit)
+        else:
+            save.clicked.connect(lambda: self.save_requested.emit(self.changes()))
         footer.addWidget(save)
         layout.addLayout(footer)
         QShortcut(QKeySequence("Ctrl+Return"), self, activated=save.click)
@@ -165,6 +171,60 @@ class NoteEditorDialog(QDialog):
                 return False
         super().reject()  # Clean draft or explicitly discarded, no second prompt.
         return True
+
+    def keyPressEvent(self, event):
+        if self._embedded and event.key() == Qt.Key.Key_Escape:
+            self.dismiss_requested.emit()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+
+class NoteEditorOverlay(QWidget):
+    """A dimmed in-app backdrop, not a native top-level note window."""
+
+    dismiss_requested = Signal()
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setObjectName("editorBackdrop")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("QWidget#editorBackdrop { background: rgba(0,0,0,0.50); }")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.editor = None
+        self._pressed_outside = False
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(24, 24, 24, 24)
+        self._layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    def set_editor(self, editor):
+        self.editor = editor
+        self._layout.addWidget(editor, 0, Qt.AlignmentFlag.AlignCenter)
+        editor.dismiss_requested.connect(self.dismiss_requested.emit)
+        self._fit_editor()
+
+    def _fit_editor(self):
+        if self.editor is not None:
+            self.editor.setFixedSize(min(600, max(380, self.width() - 48)),
+                                     min(460, max(300, self.height() - 48)))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_editor()
+
+    def mousePressEvent(self, event):
+        self._pressed_outside = (event.button() == Qt.MouseButton.LeftButton and
+            self.editor is not None and not self.editor.geometry().contains(event.position().toPoint()))
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        outside = (self.editor is not None and
+                   not self.editor.geometry().contains(event.position().toPoint()))
+        close = event.button() == Qt.MouseButton.LeftButton and self._pressed_outside and outside
+        self._pressed_outside = False
+        if close:
+            self.dismiss_requested.emit()
+        event.accept()
 
 
 class _NoWheelComboBox(QComboBox):
@@ -355,10 +415,12 @@ class NoteManagerDialog(QDialog):
         self._label_buttons = {}
         self._label_names = []
         self._editor = None
+        self._editor_overlay = None
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         header = QFrame()
+        self._header = header
         header.setObjectName("header")
         header.setStyleSheet("QFrame#header { border-bottom: 1px solid #5f6368; }")
         bar = QHBoxLayout(header)
@@ -481,6 +543,11 @@ class NoteManagerDialog(QDialog):
         self._pages.addWidget(notes_page)
         self._pages.addWidget(self._build_settings_page(font_scale))
         root.addLayout(body, 1)
+        self._pin_status = plain_label()
+        self._pin_status.setWordWrap(True)
+        self._pin_status.setStyleSheet(f"color: {ACCENT}; font-size: 11px; padding: 6px 24px;")
+        self._pin_status.hide()
+        root.addWidget(self._pin_status)
         self._status = plain_label()
         self._status.setStyleSheet(f"color: {MUTED}; font-size: 11px; padding: 8px 24px;")
         root.addWidget(self._status)
@@ -543,6 +610,8 @@ class NoteManagerDialog(QDialog):
         return page
 
     def set_sync_state(self, authenticated, writes_enabled):
+        if authenticated and writes_enabled:
+            self._pin_status.hide()
         if not authenticated:
             text = "Offline · edits are saved locally"
         elif not writes_enabled:
@@ -551,18 +620,66 @@ class NoteManagerDialog(QDialog):
             text = "Cloud writes enabled · changes use guarded Keep sync"
         self._status.setText(text)
 
+    def show_pin_notice(self, message):
+        self._pin_status.setText(message)
+        self._pin_status.show()
+
     def _show_settings(self):
         self._pages.setCurrentIndex(1 - self._pages.currentIndex())
 
     def _return_to_notes(self):
-        if self._editor is not None and not self._editor.close_for_navigation():
-            return
+        editor = self._editor
+        if editor is not None:
+            changes = editor.changes()
+            if changes:
+                editor.save_requested.emit(changes)
+                if editor.isVisible():
+                    return  # Secure-save failure/conflict: retain the bubble and draft.
+            else:
+                editor.accept()
         self._search_edit.blockSignals(True)
         self._search_edit.clear()
         self._search_edit.blockSignals(False)
         self._search_text = ""
         self._set_view("notes")
         self._notes_scroll.verticalScrollBar().setValue(0)
+
+    def create_editor(self, note, *, is_new=False):
+        overlay = NoteEditorOverlay(self)
+        overlay.setGeometry(self.rect())
+        editor = NoteEditorDialog(note, is_new=is_new, embedded=True, parent=overlay)
+        overlay.set_editor(editor)
+        overlay.dismiss_requested.connect(self._return_to_notes)
+        self._editor = editor
+        self._editor_overlay = overlay
+
+        def finished(_result):
+            self._editor = None
+            self._editor_overlay = None
+            overlay.hide()
+            for widget in (self._header, self._sidebar, self._pages):
+                widget.setEnabled(True)
+            overlay.deleteLater()
+
+        editor.finished.connect(finished)
+        return editor
+
+    def show_editor(self):
+        for widget in (self._header, self._sidebar, self._pages):
+            widget.setEnabled(False)
+        self._editor_overlay.show()
+        self._editor_overlay.raise_()
+        self._editor.show()
+        if self._editor._is_list:
+            self._editor.checklist_editor.focus_first_empty()
+        else:
+            self._editor.text_edit.setFocus()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        overlay = getattr(self, "_editor_overlay", None)
+        if overlay is not None:
+            overlay.setGeometry(self.rect())
 
     def reject(self):
         # Non-modal drafts must not disappear behind a closed dashboard.

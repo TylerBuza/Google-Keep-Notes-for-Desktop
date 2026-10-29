@@ -285,6 +285,20 @@ class HardenedKeepSync(KeepSyncV2):
                 return False
             submitted = deepcopy(note)  # GUI typing cannot mutate an in-flight write.
             try:
+                baseline = self.baselines.get(note.id)
+                if baseline is not None:
+                    previous = comparison(baseline)
+                    current = comparison(snapshot(submitted))
+                    changed = {key for key in previous.keys() | current.keys()
+                               if previous.get(key) != current.get(key)}
+                    if changed == {"pinned"}:
+                        # Body diffs can legitimately send no operations. A
+                        # pin-only edit must instead use the guarded metadata
+                        # path, including for formatted notes and checklists.
+                        sort_value = (submitted.sort_key if submitted.sort_key != baseline.get("sort_key")
+                                      else None)
+                        return self.push_metadata(submitted, is_pinned=submitted.pinned,
+                                                  sort_value=sort_value)
                 old_sort = self.baselines.get(note.id, {}).get("sort_key")
                 ok = super().push_note(submitted)
                 if ok:

@@ -113,17 +113,20 @@ note edit. Dark card display never rewrites wire colors. Desktop pins only set
 local visibility/window geometry and always-on-top state, not Keep pin metadata.
 Existing desktop visibility and per-note floating themes are retained.
 
-Drafts commit only on explicit Save (the button or navigation prompt). Only
-edited fields are committed; title-only edits
+Drafts commit on the user-requested close actions: outside/backdrop or logo
+clicks, Close, or Escape (and Save in a dashboard-exit prompt). Opening/reading
+a popup is not an edit. Only edited fields are committed; title-only edits
 retain the original body/StyledDoc. Changed body fields invalidate the cached
 StyledDoc as floating-note edits do. Before committing, the controller compares
 touched fields with the draft's original snapshot and refuses concurrent edits
 to those fields. The draft remains open on conflict, removal/ID change, or secure
 storage failure. The header's Home button clears search and returns to Notes;
-leaving an edited bubble offers Save/Discard/Cancel, with Save using the same
-guarded commit path. A bubble is non-modal so Home stays accessible; only one
-draft can be open, and closing the dashboard cannot silently hide an unsaved
-draft. Existing model object identity is preserved for in-flight sync
+the close actions all use the same guarded commit path. The bubble is an embedded
+child widget within a dimmed backdrop, not a separate native window. Underlying
+controls are disabled until it closes; clicking the backdrop, including over
+the header logo, saves the popup rather than clicking through. Only one draft
+can be open, and closing the dashboard cannot silently hide an unsaved draft.
+Existing model object identity is preserved for in-flight sync
 references. Dashboard-only notes do not retain a nonexistent floating-widget
 baseline hold after a merge. Untouched drafts create no empty note. Quit asks
 before discarding unsaved drafts.
@@ -133,6 +136,14 @@ delete path must confirm success. Remote note-type conversion remains blocked.
 Archive/Trash browsing and label editing are intentionally not implemented; their
 look must not imply safe write support. No endpoint, token-retention, consent,
 write opt-in, recovery or write-acknowledgment policy was relaxed for this UI.
+
+Keep pins and desktop pins remain distinct. A pin-only edit now routes through
+the guarded metadata writer instead of a body-diff no-op. It still requires
+write opt-in, a fresh full read, conflict/staleness checks, encrypted recovery
+and write intent, and the same strict server acknowledgment. Uncertain metadata
+writes pause without advancing the baseline. Pulls do not overwrite dirty pins
+or ordering, and clean remote metadata is backed up before adoption. These paths
+are tested offline; this is not a claim of live cloud-write verification.
 
 The auth transport only POSTs to `https://android.clients.google.com/auth`, with
 TLS >=1.2, certificate and hostname validation, a pinned CA-bundle dependency,

@@ -20,7 +20,7 @@ def main():
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         from PySide6.QtWidgets import QApplication
         from note_model import KeepNote
-        from note_manager import NoteManagerDialog, NoteEditorDialog
+        from note_manager import NoteManagerDialog
 
         app = QApplication([])
         samples = [
@@ -45,17 +45,19 @@ def main():
         dashboard.resize(args.width, args.height)
         dashboard.show()
         target = dashboard
+        editor = None
         if args.editor:
-            target = NoteEditorDialog(samples[1] if args.editor == "checklist" else samples[0], parent=dashboard)
-            target.show()
+            editor = dashboard.create_editor(samples[1] if args.editor == "checklist" else samples[0])
+            editor.save_requested.connect(lambda changes: editor.accept())
+            dashboard.show_editor()
         for _ in range(8):
             app.processEvents()
         args.output.parent.mkdir(parents=True, exist_ok=True)
         if not target.grab().save(str(args.output)):
             raise RuntimeError("Could not save preview")
         print(str(args.output))
-        if target is not dashboard:
-            target.accept()
+        if editor is not None:
+            editor.accept()
         dashboard.close()
         app.processEvents()
 

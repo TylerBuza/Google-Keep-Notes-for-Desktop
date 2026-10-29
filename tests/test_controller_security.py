@@ -123,6 +123,30 @@ def test_incoming_cloud_changes_save_previous_local_version(tmp_path, qapp):
     assert load_protected(paths[0])["remote"]["text"] == "cloud content"
 
 
+def test_pull_cannot_reset_a_keep_pin_or_order_awaiting_upload(tmp_path, qapp):
+    controller = _pull_controller(tmp_path)
+    note = controller._notes["1.test"]
+    note.pinned = True
+    note.sort_key = 123
+    controller._dirty.add(note.id)
+    AppController._apply_remote_notes(controller, [KeepNote(id=note.id, text=note.text, pinned=False, sort_key=999)])
+    assert note.pinned is True
+    assert note.sort_key == 123
+    assert note.id in controller._dirty
+
+
+def test_clean_remote_keep_pin_is_adopted_after_recovery(tmp_path, qapp):
+    from secure_storage import load_protected
+    controller = _pull_controller(tmp_path)
+    note = controller._notes["1.test"]
+    AppController._apply_remote_notes(controller, [KeepNote(id=note.id, text=note.text, pinned=True, sort_key=999)])
+    assert note.pinned is True
+    assert note.sort_key == 999
+    records = list(controller.sync.recovery_dir.glob("*.dat"))
+    assert load_protected(records[0])["local"]["pinned"] is False
+    assert load_protected(records[0])["remote"]["pinned"] is True
+
+
 def test_failed_recovery_blocks_incoming_overwrite_and_retains_old_baseline(tmp_path, qapp):
     controller = _pull_controller(tmp_path)
     controller.sync._save_recovery = MagicMock(side_effect=OSError("disk full"))

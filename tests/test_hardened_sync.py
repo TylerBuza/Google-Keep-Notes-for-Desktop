@@ -53,6 +53,81 @@ def test_read_only_default_blocks_every_mutation(sync):
     assert_no_cloud_write(sync)
 
 
+@pytest.mark.parametrize("kind", ["plain", "formatted", "checklist"])
+@pytest.mark.parametrize("pinned", [False, True])
+def test_pin_only_uses_guarded_metadata_write_not_body_diff(sync, kind, pinned):
+    before = not pinned
+    base = local("base", pinned=before)
+    remote = server(isPinned=before)
+    if kind == "formatted":
+        doc = StyledDoc(sct_id="sct.pin", paragraphs=[Paragraph(runs=[StyleRun(text="base")])])
+        base.styled_doc = doc
+        remote.sct_id = doc.sct_id
+        remote.serialized_chunks = [json.dumps(encode_full_replace(doc, current_text_length=0))]
+    elif kind == "checklist":
+        base = local("", is_list=True, pinned=before)
+        remote = server("", type="LIST", isPinned=before)
+    sync.register_cached_note(base, snapshot(base))
+    sync._client.notes[base.id] = remote
+    sync._server_notes[base.id] = remote
+    changed = deepcopy(base)
+    changed.pinned = pinned
+
+    def inspect_write(*args, **kwargs):
+        assert load_protected(sync.pause_file)["reason"] == "write-in-flight"
+        records = list(sync.recovery_dir.glob("*.dat"))
+        assert records
+        assert load_protected(records[-1])["local"]["pinned"] is pinned
+
+    sync._client.update_note_metadata.side_effect = inspect_write
+    assert sync.push_note(changed) is True
+    assert sync._client.update_note_metadata.call_args.kwargs["is_pinned"] is pinned
+    sync._client.update_note_metadata.assert_called_once()
+    for method in ("update_note_legacy_text", "update_text_diff", "update_note_doc", "update_list_diff"):
+        getattr(sync._client, method).assert_not_called()
+    assert sync.baselines[base.id]["pinned"] is pinned
+    assert not sync.pause_file.exists()
+
+
+def test_pin_only_stays_local_while_cloud_writes_are_off(sync):
+    sync.set_writes_enabled(False)
+    assert sync.push_note(local("base", pinned=True)) is False
+    assert_no_cloud_write(sync)
+    sync._client.sync.assert_not_called()
+    assert sync.baselines["1.test"]["pinned"] is False
+
+
+def test_failed_pin_write_pauses_without_advancing_baseline(sync):
+    sync._client.update_note_metadata.side_effect = KeepError("synthetic uncertain response")
+    assert sync.push_note(local("base", pinned=True)) is False
+    assert sync.baselines["1.test"]["pinned"] is False
+    assert not sync.writes_enabled
+    assert sync.pause_file.exists()
+    assert sync.push_note(local("base", pinned=True)) is False
+    sync._client.update_note_metadata.assert_called_once()
+
+
+def test_pin_only_does_not_overwrite_a_concurrent_remote_body_edit(sync):
+    sync._client.notes["1.test"] = server("phone changed the body")
+    assert sync.push_note(local("base", pinned=True)) is False
+    assert_no_cloud_write(sync)
+    assert "1.test" in sync.conflicts
+
+
+def test_pin_only_refuses_stale_snapshot(sync):
+    sync._client.is_snapshot_stale.return_value = True
+    assert sync.push_note(local("base", pinned=True)) is False
+    assert_no_cloud_write(sync)
+    assert sync.baselines["1.test"]["pinned"] is False
+
+
+def test_body_and_pin_edit_still_carries_pin_in_guarded_body_write(sync):
+    assert sync.push_note(local("new body", pinned=True)) is True
+    written = sync._client.update_note_legacy_text.call_args.args[0]
+    assert written.raw["isPinned"] is True
+    assert sync.baselines["1.test"]["pinned"] is True
+
+
 def test_uncontested_edit_has_encrypted_recovery_before_write(sync):
     note = local()
     assert sync.push_note(note) is True

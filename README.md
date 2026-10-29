@@ -71,16 +71,19 @@ the app retains its distinct K icon in the tray/taskbar. Google Keep and its log
 are Google's trademarks. This unofficial app is not affiliated with or endorsed
 by Google. Asset provenance is recorded in `keep_brand.py`.
 
-- Click a card to edit a draft. **Save** commits locally; **Cancel** confirms
-  before discarding changes. If that note changed during editing, conflicting
-  draft fields are retained in the editor rather than overwriting newer content.
+- Click a card to open an **in-app editor popup**, not another window. Clicking
+  outside, clicking the logo, **Close**, or Escape saves locally and returns to
+  Notes. **Cancel** confirms before discarding changes. A storage failure or
+  conflicting newer edit keeps the popup/draft open rather than losing work.
 - Click the **Keep Desktop** logo/title to return to all Notes and clear search.
-  An open editor closes without prompting if unchanged; unsaved edits offer
-  **Save / Discard / Cancel**. A save failure or conflict keeps the draft open.
+  An unchanged popup closes without creating a phantom edit or empty new note.
 - **Take a note…** and the checklist button create drafts without opening a
   floating window. Empty untouched drafts do not create notes.
 - **Thumbtack** changes Keep pinning/order. **Monitor** opens an always-on-top
   desktop note; clicking it again hides that window without changing Keep's pin.
+  With cloud writes off, thumbtack changes remain local and a notice says so.
+  Enabling writes in the tray opts into uploading **all pending edits**, not
+  just pins. Pin-only uploads use guarded metadata writes, not body rewrites.
 - Color display uses local dark equivalents without changing cloud note colors.
   Explicit color selection is a normal edit, still subject to cloud-write opt-in.
 - More actions include reorder, delete (with confirmation), and type conversion

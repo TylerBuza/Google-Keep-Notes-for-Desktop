@@ -91,60 +91,129 @@ def test_logo_and_brand_text_return_home_from_every_page(dashboard, view, click_
     assert dashboard.result_visibility == before
 
 
-@pytest.mark.parametrize("decision", ["Save", "Discard", "Cancel", "Save fails"])
+@pytest.mark.parametrize("decision", ["Save", "Save fails"])
 def test_home_leaves_note_bubble_without_losing_unsaved_work(dashboard, qapp, monkeypatch, decision):
-    from PySide6.QtWidgets import QMessageBox
     dashboard._set_view("desktop")
-    editor = NoteEditorDialog(dashboard._all_notes["1.a"], parent=dashboard)
-    dashboard._editor = editor
-    editor.finished.connect(lambda result: setattr(dashboard, "_editor", None))
+    editor = dashboard.create_editor(dashboard._all_notes["1.a"])
     saved = MagicMock()
+    prompt = MagicMock()
+    monkeypatch.setattr("note_manager.QMessageBox.question", prompt)
     editor.save_requested.connect(saved)
     if decision == "Save":
         editor.save_requested.connect(lambda changes: editor.accept())
     elif decision == "Save fails":
         editor.save_requested.connect(lambda changes: editor.show_error("Synthetic save failure"))
-    editor.show()
+    dashboard.show_editor()
     editor.title_edit.setText("Synthetic draft")
-    monkeypatch.setattr("note_manager.QMessageBox.question", lambda *args:
-        getattr(QMessageBox.StandardButton, "Save" if decision == "Save fails" else decision))
     try:
-        assert editor.windowModality() == Qt.WindowModality.NonModal
-        QTest.mouseClick(dashboard._home_button, Qt.MouseButton.LeftButton)
+        assert not editor.isWindow()
+        overlay = dashboard._editor_overlay
+        logo_pos = dashboard._home_button.mapTo(dashboard, QPoint(18, 18))
+        QTest.mouseClick(overlay, Qt.MouseButton.LeftButton, pos=logo_pos)
         qapp.processEvents()
-        leave = decision in ("Save", "Discard")
-        assert editor.isVisible() is not leave
+        leave = decision == "Save"
+        assert (dashboard._editor is None) is leave
         assert dashboard._view == ("notes" if leave else "desktop")
         assert dashboard._all_notes["1.a"].title == "Pinned"
-        if decision.startswith("Save"):
-            saved.assert_called_once_with({"title": "Synthetic draft"})
-        else:
-            saved.assert_not_called()
+        saved.assert_called_once_with({"title": "Synthetic draft"})
+        prompt.assert_not_called()
         if decision == "Save fails":
             assert not editor.error.isHidden()
     finally:
-        editor.accept()
-        editor.deleteLater()
+        if dashboard._editor is not None:
+            dashboard._editor.accept()
 
 
 def test_home_closes_clean_bubble_without_prompt_or_save(dashboard, monkeypatch):
-    editor = NoteEditorDialog(dashboard._all_notes["1.a"], parent=dashboard)
-    dashboard._editor = editor
-    editor.finished.connect(lambda result: setattr(dashboard, "_editor", None))
+    editor = dashboard.create_editor(dashboard._all_notes["1.a"])
     saved = MagicMock()
     prompt = MagicMock()
     monkeypatch.setattr("note_manager.QMessageBox.question", prompt)
     editor.save_requested.connect(saved)
-    editor.show()
+    dashboard.show_editor()
     try:
-        dashboard._home_button.click()
-        assert not editor.isVisible()
+        dashboard._return_to_notes()
         assert dashboard._editor is None
         prompt.assert_not_called()
         saved.assert_not_called()
     finally:
+        if dashboard._editor is not None:
+            dashboard._editor.accept()
+
+
+def test_editor_is_inside_app_and_backdrop_saves_without_prompt(dashboard, qapp, monkeypatch):
+    editor = dashboard.create_editor(dashboard._all_notes["1.a"])
+    saved, prompt = MagicMock(), MagicMock()
+    editor.save_requested.connect(saved)
+    editor.save_requested.connect(lambda changes: editor.accept())
+    monkeypatch.setattr("note_manager.QMessageBox.question", prompt)
+    dashboard.show_editor()
+    editor.title_edit.setText("Synthetic changed title")
+    overlay = dashboard._editor_overlay
+    try:
+        qapp.processEvents()
+        assert not editor.isWindow()
+        assert editor.window() is dashboard
+        assert overlay.window() is dashboard
+        assert not dashboard._pages.isEnabled()
+        QTest.mouseClick(editor, Qt.MouseButton.LeftButton, pos=QPoint(8, 8))
+        saved.assert_not_called()
+        QTest.mouseClick(overlay, Qt.MouseButton.LeftButton, pos=QPoint(8, overlay.height() - 8))
+        assert dashboard._editor is None
+        assert dashboard._editor_overlay is None
+        assert dashboard._pages.isEnabled()
+        assert dashboard._header.isEnabled()
+        saved.assert_called_once_with({"title": "Synthetic changed title"})
+        prompt.assert_not_called()
+    finally:
+        if dashboard._editor is not None:
+            dashboard._editor.accept()
+
+
+@pytest.mark.parametrize("width,height", [(640, 480), (1180, 800), (1500, 1000)])
+def test_editor_overlay_stays_contained_on_resize(dashboard, qapp, width, height):
+    editor = dashboard.create_editor(dashboard._all_notes["1.a"])
+    dashboard.show_editor()
+    try:
+        dashboard.resize(width, height)
+        qapp.processEvents()
+        overlay = dashboard._editor_overlay
+        assert overlay.geometry() == dashboard.rect()
+        assert overlay.rect().contains(editor.geometry())
+        assert editor.width() <= 600
+        assert editor.height() <= 460
+    finally:
         editor.accept()
-        editor.deleteLater()
+
+
+@pytest.mark.parametrize("close_method", ["escape", "close_button"])
+def test_popup_escape_or_close_saves_and_returns_home(dashboard, qapp, close_method):
+    from PySide6.QtWidgets import QPushButton
+    dashboard._set_view("label:Ideas")
+    editor = dashboard.create_editor(dashboard._all_notes["3.c"])
+    saved = MagicMock()
+    editor.save_requested.connect(saved)
+    editor.save_requested.connect(lambda changes: editor.accept())
+    dashboard.show_editor()
+    editor.title_edit.setText("Synthetic draft")
+    if close_method == "escape":
+        QTest.keyClick(editor, Qt.Key.Key_Escape)
+    else:
+        next(button for button in editor.findChildren(QPushButton) if button.text() == "Close").click()
+    assert dashboard._editor is None
+    assert dashboard._view == "notes"
+    saved.assert_called_once_with({"title": "Synthetic draft"})
+
+
+def test_read_only_keep_pin_notice_is_explicit_without_enabling_writes(dashboard):
+    ctl = SimpleNamespace(_notes=dashboard._all_notes, _dirty=set(), _last_edit_time={},
+        _save_notes_to_disk=MagicMock(), _refresh_manager_if_open=MagicMock(), _manager_dlg=dashboard,
+        sync=SimpleNamespace(is_authenticated=True, writes_enabled=False), _sync_debounce=MagicMock())
+    AppController._toggle_note_pin(ctl, "2.b")
+    assert ctl._notes["2.b"].pinned is True
+    assert ctl.sync.writes_enabled is False
+    assert "cloud writes are off" in dashboard._pin_status.text()
+    assert not dashboard._pin_status.isHidden()
 
 
 def test_closing_dashboard_cannot_hide_an_unsaved_bubble(dashboard, monkeypatch):
@@ -554,6 +623,12 @@ def test_full_offline_controller_dashboard_edit_and_float_flow(qapp, monkeypatch
     try:
         ctl._show_note_manager()
         ctl._open_dashboard_editor()
+        qapp.processEvents()
+        untouched = ctl._manager_dlg._editor_overlay
+        QTest.mouseClick(untouched, Qt.MouseButton.LeftButton, pos=QPoint(8, 8))
+        assert ctl._notes == {}
+        assert ctl._manager_dlg._editor is None
+        ctl._open_dashboard_editor()
         editor = ctl._manager_dlg._editor
         assert not ctl._notes
         editor.title_edit.setText("Synthetic note")
@@ -574,9 +649,9 @@ def test_full_offline_controller_dashboard_edit_and_float_flow(qapp, monkeypatch
         ctl._open_dashboard_editor(note.id)
         editor = ctl._manager_dlg._editor
         editor.title_edit.setText("Edited from dashboard")
-        from PySide6.QtWidgets import QMessageBox
-        monkeypatch.setattr("note_manager.QMessageBox.question", lambda *args: QMessageBox.StandardButton.Save)
-        ctl._manager_dlg._home_button.click()
+        assert not editor.isWindow()
+        backdrop = ctl._manager_dlg._editor_overlay
+        QTest.mouseClick(backdrop, Qt.MouseButton.LeftButton, pos=QPoint(8, backdrop.height() - 8))
         qapp.processEvents()
         assert ctl._manager_dlg._editor is None
         assert ctl._manager_dlg._view == "notes"

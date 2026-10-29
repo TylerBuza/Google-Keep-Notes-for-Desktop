@@ -33,7 +33,7 @@ from app_icon import make_icon as _make_icon
 import note_window
 from note_window import NoteWindow
 from note_model import KeepNote
-from note_manager import NoteManagerDialog, NoteEditorDialog, edit_snapshot
+from note_manager import NoteManagerDialog, edit_snapshot
 from updater import UpdateChecker, prompt_and_install
 
 log = logging.getLogger(__name__)
@@ -1484,6 +1484,10 @@ class AppController(QObject):
         self._last_edit_time[note_id] = time.monotonic()
         self._save_notes_to_disk()
         self._refresh_manager_if_open()
+        manager = getattr(self, "_manager_dlg", None)
+        if manager is not None and not self.sync.writes_enabled:
+            manager.show_pin_notice("Keep pin saved locally — cloud writes are off. "
+                                    "Enable writes in the tray to upload; monitor pins are desktop-only.")
         if self.sync.is_authenticated:
             self._sync_debounce.start()
 
@@ -1618,16 +1622,9 @@ class AppController(QObject):
                 if is_new else self._notes.get(note_id))
         if note is None:
             return
-        editor = NoteEditorDialog(note, is_new=is_new, parent=manager)
-        manager._editor = editor
+        editor = manager.create_editor(note, is_new=is_new)
         editor.save_requested.connect(lambda changes: self._save_dashboard_edit(editor, changes))
-
-        def finished(_result):
-            manager._editor = None
-            editor.deleteLater()
-
-        editor.finished.connect(finished)
-        editor.show()
+        manager.show_editor()
 
     def _save_dashboard_edit(self, editor, changes):
         """Commit a draft without overwriting an edit or pull that arrived meanwhile."""
@@ -2125,10 +2122,6 @@ class AppController(QObject):
                 if self._visibility.get(rn.id, False):
                     self._add_window_for_note(rn)
             else:
-                # Update sort/pin info always — these aren't user-edit
-                # surfaces so they can't conflict with typing.
-                existing.sort_key = rn.sort_key
-                existing.pinned = rn.pinned
                 # Compute merge decision with the user's editing state.
                 idle_for = time.monotonic() - self._last_edit_time.get(rn.id, 0.0)
                 user_busy = self._is_note_busy(rn.id)
@@ -2144,8 +2137,9 @@ class AppController(QObject):
                     log.info("Skipping remote update for %s (locally dirty)", rn.id[:8])
                     continue
 
+                metadata_changed = existing.pinned != rn.pinned or existing.sort_key != rn.sort_key
                 if (decision.text_changed or decision.title_changed or decision.list_changed
-                        or decision.html_changed or decision.color_changed):
+                        or decision.html_changed or decision.color_changed or metadata_changed):
                     from hardened_sync import snapshot
                     try:
                         self.sync._save_recovery(local=snapshot(existing), remote=snapshot(rn),
@@ -2156,8 +2150,14 @@ class AppController(QObject):
                         self.sync.register_cached_note(existing, snapshot(existing))
                         self._dirty.add(rn.id)
                         self._sync_notice.emit("Could not save recovery before applying a cloud edit. "
-                                               "The local version was retained and marked pending.")
+                                                "The local version was retained and marked pending.")
                         continue
+
+                # Pinning and ordering are editable surfaces too. Only adopt
+                # remote metadata after SKIP_DIRTY and secure recovery, never
+                # erase a pin still waiting for cloud-write opt-in or upload.
+                existing.sort_key = rn.sort_key
+                existing.pinned = rn.pinned
 
                 # Diagnostics
                 changes = []
