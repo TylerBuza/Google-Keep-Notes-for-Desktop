@@ -9,6 +9,7 @@ from functools import partial
 
 from PySide6.QtCore import Qt, QTimer, Slot, Signal, QObject, QUrl
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QFont
+from PySide6.QtNetwork import QNetworkCookie
 from PySide6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QDialog,
     QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -330,13 +331,13 @@ class LoginDialog(QDialog):
     """Opens an embedded Google sign-in browser.
 
     After the user authenticates, the oauth_token cookie is captured
-    and exchanged for a master token via gpsoauth.exchange_token.
+    and exchanged through the endpoint-locked Google transport.
     """
 
     def __init__(self, first_launch=False, parent=None):
         super().__init__(parent)
         self.setWindowTitle("KeepDesktop – Sign in to Google")
-        self.resize(480, 640)
+        self.resize(560, 820)
         self.signed_in = False
         self._keep_sync = None
         self._captured_token = None
@@ -354,9 +355,8 @@ class LoginDialog(QDialog):
         # No network sign-in page loads before explicit informed consent.
         info = QLabel(
             "Experimental Google login — not a Google-approved OAuth client. "
-            "This flow temporarily obtains a powerful Google master token. By default, "
-            "only a Keep-scoped access token stays in memory for at most 45 minutes, "
-            "then you must sign in again. Local sign-out does not revoke Google's token."
+            "Uses a powerful Google master token, not just Keep-only permission. "
+            "Google sign-in in this build remembers your account on this PC."
         )
         info.setTextFormat(Qt.TextFormat.PlainText)
         info.setStyleSheet(
@@ -366,20 +366,42 @@ class LoginDialog(QDialog):
         info.setWordWrap(True)
         layout.addWidget(info)
 
-        self._risk_consent = QCheckBox("I understand and want to use experimental Google sign-in")
+        self._retention_info = QLabel(
+            "Remember on this PC — saves a powerful master token, encrypted.\n\n"
+            "Stay signed in across app restarts. The app renews Keep access with Google as needed, "
+            "until you sign out or Google rejects/revokes access. There is no fixed app time limit "
+            "and no guaranteed number of days."
+        )
+        self._retention_info.setTextFormat(Qt.TextFormat.PlainText)
+        self._retention_info.setWordWrap(True)
+        self._retention_info.setStyleSheet("padding: 8px; color: #333; background: #F1F3F4; font-size: 12px;")
+        self._retention_info.setAccessibleName("Selected sign-in duration and credential storage")
+        layout.addWidget(self._retention_info)
+        self._retention_details = QLabel(
+            "Windows encryption protects the saved token on disk, not from malware running as you. "
+            "Signing out removes this app's saved credential but does not revoke it at Google. "
+            "Revoke the device/session in Google Account Security if needed.\n\n"
+            "Only allowlisted Google-owned HTTPS destinations are permitted by the app. "
+            "Third-party resources and opening external links are blocked. Cloud writes start OFF. "
+            "You can cancel and use offline notes."
+        )
+        self._retention_details.setTextFormat(Qt.TextFormat.PlainText)
+        self._retention_details.setWordWrap(True)
+        self._retention_details.setStyleSheet("padding: 8px; font-size: 12px;")
+        layout.addWidget(self._retention_details)
+        self._risk_consent = QCheckBox("I understand and agree to save the master token on this PC")
         layout.addWidget(self._risk_consent)
-        self._remember = QCheckBox("Remember on this PC (saves a powerful master token, encrypted)")
-        self._remember.setChecked(False)
-        layout.addWidget(self._remember)
         self._continue_btn = QPushButton("Continue to Google")
         self._continue_btn.setEnabled(False)
         self._risk_consent.toggled.connect(self._continue_btn.setEnabled)
         self._continue_btn.clicked.connect(self._begin_signin)
         layout.addWidget(self._continue_btn)
 
-        self._origin = QLineEdit("Not connected — sign-in has not started")
+        self._origin = QLineEdit("Not connected — target: " + EMBEDDED_SETUP_URL)
         self._origin.setReadOnly(True)
         self._origin.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        self._origin.setCursorPosition(0)
+        self._origin.setToolTip("Actual Google HTTPS origin and path. Secret query/fragment values are hidden.")
         self._origin.setAccessibleName("Google sign-in origin and path (queries hidden)")
         layout.addWidget(self._origin)
 
@@ -442,20 +464,18 @@ class LoginDialog(QDialog):
     def _begin_signin(self):
         if not self._risk_consent.isChecked() or self._login_started:
             return
-        if self._remember.isChecked():
-            answer = QMessageBox.question(
-                self, "Save a Google master token?",
-                "This retains a powerful, long-lived Google credential on this PC. "
-                "Windows encryption does not protect against malware running as you. "
-                "Session-only sign-in is safer. Remember this account anyway?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                self._remember.setChecked(False)
-        self._remember_login = self._remember.isChecked()
+        answer = QMessageBox.question(
+            self, "Remember Google on this PC?",
+            "Save the powerful, long-lived Google master token encrypted for your Windows user? "
+            "The app will renew Keep access and reconnect after restarts. Malware running as you "
+            "may read the token. Choose No to stay offline; sign-in will not start.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._remember_login = True
         self._login_started = True
-        self._remember.setEnabled(False)
         self._risk_consent.setEnabled(False)
         self._continue_btn.setEnabled(False)
         self._browser.setUrl(QUrl(EMBEDDED_SETUP_URL))
@@ -468,6 +488,7 @@ class LoginDialog(QDialog):
     @Slot(QUrl)
     def _on_url_changed(self, url):
         self._origin.setText(display_address(url))
+        self._origin.setCursorPosition(0)  # Never scroll the trusted origin out of view.
 
     @Slot(bool)
     def _on_page_loaded(self, success):
@@ -500,6 +521,7 @@ class LoginDialog(QDialog):
                 except Exception:
                     pass  # logout disables in-memory access even on storage failure.
 
+    @Slot(QNetworkCookie)
     def _on_cookie(self, cookie):
         """Called for every cookie set by the embedded browser."""
         if not self._login_started or self._cancelled.is_set():
@@ -546,7 +568,7 @@ class LoginDialog(QDialog):
             self._signals.result.emit(False, "Google did not return a verified account identity.")
             return
 
-        # Now authenticate with gkeepapi
+        # Now authenticate through the hardened Keep protocol client.
         try:
             ok = self._keep_sync.login(resolved_email, master_token=master_token,
                                        remember=self._remember_login, consent=True,
@@ -875,12 +897,14 @@ class NoteManagerDialog(QDialog):
         text_col.setSpacing(1)
 
         title_label = QLabel("")
+        title_label.setTextFormat(Qt.TextFormat.PlainText)
         title_label.setStyleSheet("background: transparent; color: #333; font-size: 12px;")
         title_label.setMinimumWidth(0)
         title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         text_col.addWidget(title_label)
 
         snip_label = QLabel("")
+        snip_label.setTextFormat(Qt.TextFormat.PlainText)
         snip_label.setStyleSheet(
             "background: transparent; color: #666; font-size: 11px;"
         )
@@ -2856,12 +2880,13 @@ class AppController(QObject):
             f"<h3>{APP_NAME} {APP_VERSION}</h3>"
             "<p>Google Keep on your Windows desktop as floating sticky notes.</p>"
             "<p>Licensed under the "
-            "<a href='https://www.gnu.org/licenses/agpl-3.0.html'>"
-            "GNU Affero General Public License v3.0</a>.</p>"
-            f"<p><a href='https://github.com/{GITHUB_REPO}'>"
-            f"github.com/{GITHUB_REPO}</a></p>"
+            "GNU Affero General Public License v3.0 (included in LICENSE).</p>"
+            f"<p>Source: github.com/{GITHUB_REPO} (copy into a browser separately).</p>"
+            "<p>Google-only runtime networking. External links and in-app updater "
+            "downloads are disabled.</p>"
         )
-        body.setOpenExternalLinks(True)
+        body.setOpenExternalLinks(False)
+        body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         body.setWordWrap(True)
         v.addWidget(body)
 

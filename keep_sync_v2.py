@@ -2194,13 +2194,13 @@ def html_to_styled_doc(html: str, *, sct_id: Optional[str] = None) -> StyledDoc:
     QTextDocument is the safest parser here: it handles every variant
     Qt's editor produces, normalises whitespace, and resolves CSS the
     same way the editor displays it."""
-    from PySide6.QtGui import QTextDocument
+    from native_resources import LocalNoteDocument
     from keep_protocol.nested_model import Paragraph, StyleRun, coalesce_runs
 
     if not html:
         return StyledDoc(sct_id=sct_id, paragraphs=[])
 
-    qdoc = QTextDocument()
+    qdoc = LocalNoteDocument()
     # Match NoteTextEdit's stylesheet: Qt's default makes <h1>/<h2>
     # bold, which would cause us to emit ts_bd ops for every char of a
     # heading and round-trip the whole heading as bold. Override before

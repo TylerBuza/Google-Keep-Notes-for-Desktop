@@ -5,6 +5,9 @@ import logging
 import logging.handlers
 import os
 
+from network_policy import configure_browser_network
+configure_browser_network()
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 

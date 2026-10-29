@@ -1,8 +1,8 @@
 """Credential types and legacy credential cleanup; no browser/cookie CLI.
 
-Desktop login is guarded by the consent/origin UI. Session-only mode keeps
-only a short-lived Keep bearer after the initial exchange. Remembering a
-master token requires a separate explicit opt-in and encrypted storage.
+Desktop login is remembered-only, guarded by consent, confirmation and origin
+checks. Master tokens require encrypted storage. The internal session-only
+credential helper remains for compatibility/tests, not as a desktop UI mode.
 """
 
 from __future__ import annotations

@@ -35,6 +35,11 @@ def test_visible_address_never_includes_oauth_parameters():
     assert "dummy-secret" not in display_address(url)
 
 
+def test_visible_address_encodes_directional_controls():
+    assert display_address(QUrl("https://accounts.google.com/\u202eevil")) == (
+        "https://accounts.google.com/%E2%80%AEevil")
+
+
 def test_page_rejects_external_navigation_and_popups():
     page = SimpleNamespace(blocked=MagicMock())
     assert GuardedGooglePage.acceptNavigationRequest(page, QUrl("https://evil.test/"), 0, True) is False
@@ -67,29 +72,44 @@ def test_resource_policy_blocks_external_executable_content(url, kind, blocked):
     request.requestUrl.return_value = QUrl(url)
     request.firstPartyUrl.return_value = QUrl("https://accounts.google.com/")
     request.resourceType.return_value = getattr(QWebEngineUrlRequestInfo.ResourceType, kind)
-    interceptor = SimpleNamespace(_reported=set(), blocked=MagicMock())
+    interceptor = AuthRequestInterceptor()
     AuthRequestInterceptor.interceptRequest(interceptor, request)
     assert request.block.called is blocked
 
 
-def test_login_requires_consent_and_defaults_to_no_credential_retention(qapp, monkeypatch):
+def test_login_only_remembers_after_consent_and_confirmation(qapp, monkeypatch):
     from app_controller import LoginDialog
     from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWidgets import QMessageBox
     navigate = MagicMock()
     monkeypatch.setattr(QWebEngineView, "setUrl", navigate)
+    confirm = MagicMock(return_value=QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "question", confirm)
     dialog = LoginDialog(first_launch=True)
     try:
         assert dialog._profile.isOffTheRecord()
         assert dialog._origin.isReadOnly()
-        assert not dialog._remember.isChecked()
+        assert dialog.metaObject().indexOfSlot("_on_cookie(QNetworkCookie)") >= 0
+        assert not dialog._remember_login
+        assert "Remember on this PC" in dialog._retention_info.text()
+        assert "45" not in dialog._retention_info.text() + dialog._retention_details.text()
         assert not dialog._risk_consent.isChecked()
         navigate.assert_not_called()
         dialog._begin_signin()
         navigate.assert_not_called()
+        confirm.assert_not_called()
         dialog._risk_consent.setChecked(True)
         dialog._begin_signin()
+        navigate.assert_not_called()
+        assert not dialog._remember_login
+        confirm.return_value = QMessageBox.StandardButton.Yes
+        dialog._begin_signin()
         navigate.assert_called_once_with(QUrl("https://accounts.google.com/EmbeddedSetup"))
-        assert dialog._remember_login is False
+        assert dialog._remember_login is True
+        assert dialog._risk_consent.isEnabled() is False
+        # Address follows the actual allowed page, and never includes secret parameters.
+        dialog._on_url_changed(QUrl("https://accounts.google.com/v3/signin?secret=hidden"))
+        assert dialog._origin.text() == "https://accounts.google.com/v3/signin"
     finally:
         dialog.reject()
         import shiboken6
@@ -140,3 +160,50 @@ def test_cookie_capture_is_disabled_before_consent_and_after_cancellation():
     dialog._cancelled.set()
     LoginDialog._on_cookie(dialog, cookie)
     dialog._signals.token_found.emit.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", list(QWebEngineUrlRequestInfo.ResourceType))
+def test_every_resource_category_blocks_non_google_destinations(kind):
+    request = MagicMock()
+    request.requestUrl.return_value = QUrl("https://not-google.test/resource?token=must-not-log")
+    request.firstPartyUrl.return_value = QUrl("https://accounts.google.com/")
+    request.resourceType.return_value = kind
+    interceptor = AuthRequestInterceptor()
+    messages = []
+    interceptor.blocked.connect(messages.append)
+    interceptor.interceptRequest(request)
+    request.block.assert_called_once_with(True)
+    assert interceptor.observed_hosts() == []
+    assert all("must-not-log" not in text and "not-google" not in text for text in messages)
+
+
+@pytest.mark.parametrize("kind", ["ResourceTypeWebSocket", "ResourceTypeWorker", "ResourceTypeSharedWorker",
+    "ResourceTypeServiceWorker", "ResourceTypePing", "ResourceTypePrefetch", "ResourceTypeCspReport",
+    "ResourceTypeObject", "ResourceTypeMedia", "ResourceTypeUnknown"])
+def test_unneeded_background_channels_blocked_even_on_google(kind):
+    request = MagicMock()
+    request.requestUrl.return_value = QUrl("https://accounts.google.com/background")
+    request.resourceType.return_value = getattr(QWebEngineUrlRequestInfo.ResourceType, kind)
+    interceptor = AuthRequestInterceptor()
+    interceptor.interceptRequest(request)
+    request.block.assert_called_once_with(True)
+
+
+@pytest.mark.parametrize("host", ["accounts.youtube.com", "www.recaptcha.net", "google-analytics.com",
+    "www.googletagmanager.com", "github.com", "api.github.com", "evil.google.com", "127.0.0.1"])
+def test_unlisted_hosts_have_no_resource_exception(host):
+    request = MagicMock()
+    request.requestUrl.return_value = QUrl(f"https://{host}/recaptcha/script.js")
+    request.resourceType.return_value = QWebEngineUrlRequestInfo.ResourceType.ResourceTypeScript
+    interceptor = AuthRequestInterceptor()
+    interceptor.interceptRequest(request)
+    request.block.assert_called_once_with(True)
+
+
+def test_host_diagnostics_never_record_paths_queries_or_fragments():
+    request = MagicMock()
+    request.requestUrl.return_value = QUrl("https://www.gstatic.com/secret?token=dummy#secret")
+    request.resourceType.return_value = QWebEngineUrlRequestInfo.ResourceType.ResourceTypeScript
+    interceptor = AuthRequestInterceptor()
+    interceptor.interceptRequest(request)
+    assert interceptor.observed_hosts() == ["www.gstatic.com"]

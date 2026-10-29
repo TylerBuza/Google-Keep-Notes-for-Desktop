@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from keep_protocol.nested_model import u16_len
+from native_resources import LocalNoteDocument
 from config import (
     KEEP_COLORS, KEEP_COLORS_DARK, DEFAULT_WIDTH, DEFAULT_HEIGHT,
     MIN_WIDTH, MIN_HEIGHT, set_position, get_position,
@@ -894,6 +895,7 @@ class NoteTextEdit(QTextEdit):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setDocument(LocalNoteDocument(self))
         self.setFont(QFont("Segoe UI", round(_scaled_pt(BASE_BODY_PT))))
         self.setAcceptRichText(True)
         # Qt's built-in HTML renderer applies font-weight:bold to <h1>
@@ -1106,20 +1108,11 @@ class NoteTextEdit(QTextEdit):
         return None
 
     def _open_link(self, url: str) -> None:
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
-        if url.startswith("www."):
-            url = "https://" + url
-        elif "@" in url and not url.startswith("mailto:") and "://" not in url:
-            url = "mailto:" + url
-        elif (not url.startswith(("http://", "https://", "mailto:", "tel:"))
-              and "@" not in url):
-            # Phone number: strip formatting whitespace/punctuation so the
-            # OS handler (Skype, Teams, dialer, etc.) gets a clean number.
-            digits = "".join(ch for ch in url if ch.isdigit() or ch == "+")
-            if digits:
-                url = "tel:" + digits
-        QDesktopServices.openUrl(QUrl(url))
+        # Even a Google link opened in the system browser could fetch arbitrary
+        # third-party resources. Do not hand note content to an external app.
+        from PySide6.QtWidgets import QToolTip
+        QToolTip.showText(QCursor.pos(), "Opening links is disabled by Google-only networking. "
+                          "Copy the text and use a browser separately if needed.", self)
 
     def mouseMoveEvent(self, event):
         # Show the pointing-hand cursor when Ctrl is held over a URL,

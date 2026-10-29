@@ -21,7 +21,8 @@ def verify(path):
                                               for root in ("keep_sync", "gkeepapi", "gpsoauth", "Cryptodome"))}
     if forbidden:
         raise RuntimeError("Legacy login code present in frozen build: " + ", ".join(sorted(forbidden)))
-    required = {"login_security", "keep_protocol.auth_transport", "note_model", "hardened_sync"}
+    required = {"login_security", "keep_protocol.auth_transport", "note_model", "hardened_sync",
+                "network_policy", "keep_protocol.transport", "native_resources"}
     if not required.issubset(names):
         raise RuntimeError("Frozen build is missing a required security module.")
     return {"legacy_auth_modules_absent": True, "required_security_modules_present": True,

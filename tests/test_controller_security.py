@@ -74,8 +74,9 @@ def test_created_note_is_saved_before_creation_journal_is_cleared(monkeypatch):
 
 def test_private_build_never_downloads_or_runs_installer(monkeypatch):
     import updater
+    import urllib.request
     urlopen = MagicMock(side_effect=AssertionError("No installer requests allowed"))
-    monkeypatch.setattr(updater.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     assert updater.fetch_latest_release() is None
     assert updater.download_installer("https://example.test/installer.exe") is None
     assert updater.run_installer_and_quit("unused.exe") is False

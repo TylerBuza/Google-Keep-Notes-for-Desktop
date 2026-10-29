@@ -6,7 +6,8 @@ from tools.verify_frozen_security import verify
 
 
 def inventory(extra=()):
-    names = ("login_security", "keep_protocol.auth_transport", "note_model", "hardened_sync")
+    names = ("login_security", "keep_protocol.auth_transport", "note_model", "hardened_sync",
+             "network_policy", "keep_protocol.transport", "native_resources")
     return [(name, "dummy-path.py", "PYMODULE") for name in (*names, *extra)]
 
 

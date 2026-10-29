@@ -11,9 +11,9 @@ upstream commit `60a70ffee9bed33fbc1aa373203a89a03df7dc3f` (v2.2.0).
 Original history, attribution and AGPL-3.0 license are retained. This is a
 private standalone repository because GitHub public forks cannot be private.
 
-- **Session-only login by default:** after the initial exchange, retain only
-  a Keep-scoped bearer in memory for at most 45 minutes. Remembering the
-  powerful master token requires a separate explicit opt-in.
+- **Remembered Google sign-in:** the requested desktop mode saves a powerful
+  master token with Windows encryption after consent and confirmation. It
+  renews Keep access across restarts, with no fixed app time limit.
 - **Protected remembered credentials and notes:** per-Windows-user DPAPI encryption,
   atomic saves, migration of the old plaintext cache/token, and sign-out
   that clears both stored credentials and in-memory access. Login cookies
@@ -36,6 +36,10 @@ private standalone repository because GitHub public forks cannot be private.
   and resource allowlists, rejected certificate errors, no popups/downloads,
   no manual-cookie/CLI capture bypass, and no automatic import of old logins.
   See [the login review](security/LOGIN-REVIEW.md) for tested checks and limits.
+- **Google-only runtime networking:** exact Google-owned destination lists,
+  direct HTTPS without environment/system proxies, and no runtime updater.
+  Notes cannot fetch linked resources or launch external links. This is an
+  app-level restriction, not an OS firewall or malware-containment guarantee.
 
 Google’s internal API is **still unofficial**. It cannot be made supported
 by a fork. See [SECURITY.md](SECURITY.md) for limits and recovery guidance.
@@ -60,24 +64,25 @@ Run this copy from source using the commands below. Upstream installers do
 ## Connecting Google Keep
 
 1. Right-click the tray icon → **Sign in to Google Keep**
-2. Read the experimental-login warning. Leave **Remember on this PC** unchecked
-   for session-only mode, acknowledge the risk, then click **Continue to Google**.
+2. Read **Remember on this PC — saves a powerful master token, encrypted**.
+   Acknowledge saving the credential, click **Continue to Google**, and confirm.
+   Choose No/Cancel to stay offline; there is no session-only desktop option.
 3. Verify the displayed address starts with `https://accounts.google.com`.
    Complete Google's password/2FA prompts yourself. If Google blocks the embedded
    browser, stop—this app offers no security-warning bypass.
 4. On success, the window closes and notes sync into the manager. Cloud writes
    are reset to OFF after each login; enable them separately only after a backup.
 
-This is **not** a Google-approved public OAuth integration. The initial exchange
-still temporarily obtains a powerful master token. Session-only mode does not
-retain it as a credential: it keeps only the requested Keep-scoped bearer in
-memory for at most 45 minutes, then requires another sign-in. Python cannot
-guarantee forensic erasure of transient strings from process memory.
+This is **not** a Google-approved public OAuth integration. After consent and
+confirmation, the master token is saved with Windows DPAPI in
+`%APPDATA%\KeepDesktop\keep_token.dat` and reused on later starts. Keep access
+tokens are renewed as needed. This continues until local sign-out or Google's
+rejection/revocation, not for a guaranteed number of days. The previous
+session-only duration cap is not used by the desktop login.
 
-Only if you explicitly choose **Remember** is the master token saved with
-Windows DPAPI in `%APPDATA%\KeepDesktop\keep_token.dat` and reused on later starts.
-Session-only sign-in removes older remembered credentials for that account.
-Legacy credential-manager copies are cleaned up on opt-out/sign-out. CLI cookie
+Windows encryption does not protect against malware running as you. Python
+cannot guarantee forensic erasure of transient strings from memory.
+Legacy credential-manager copies are cleaned up on sign-out. CLI cookie
 capture and bearer-printing commands are disabled. Revoke the device/session from
 [Google Account → Security → Your devices](https://myaccount.google.com/device-activity)
 if needed. Signing out locally does not revoke Google's server-side token.
@@ -156,7 +161,7 @@ GitHub Actions does this automatically on every `v*` tag — see `.github/workfl
 | `secure_storage.py` | Windows DPAPI encryption and atomic file replacement |
 | `keep_sync.py` | Legacy compatibility shim (KeepNote dataclass + colour maps) |
 | `sync_merge.py` | Three-way local/remote merge decisions |
-| `updater.py` | GitHub Releases auto-updater |
+| `updater.py` | No-network compatibility stub; runtime updater removed |
 | `config.py` | Settings, positions, autostart, paths, version |
 | `KeepDesktop.spec` | PyInstaller build spec |
 | `installer.iss` | Inno Setup installer script |

@@ -5,9 +5,11 @@
 The desktop entry point uses `HardenedKeepSync`, never the legacy gkeepapi
 writer. Remembered master tokens and the local notes cache use current-user
 Windows DPAPI (not machine-wide protection). Secure-storage failure is an error;
-there is no plaintext fallback. Default sign-in instead retains only a Keep
-bearer in memory for at most 45 minutes. Retaining the master token requires a
-separate explicit confirmation. Old credentials cannot auto-login without the
+there is no plaintext fallback. At the user's request the desktop login now
+offers only **Remember on this PC**, with no fixed app duration cap. Saving the
+powerful master token still requires explicit consent and a separate
+confirmation, defaulting to No. Refusing it stays offline, not a different
+credential-retention mode. Old credentials cannot auto-login without the
 new consent version and explicit remember preference. Credential-manager access
 is limited to Windows' native backend for legacy cleanup. Token responses are
 not included in logs or exception messages; credentials have redacted reprs.
@@ -30,6 +32,50 @@ no redirects/retries/environment proxies/netrc, bounded timeouts/response size,
 and fixed error messages. Only Keep's memento scope is requested for the bearer;
 the unused reminders scope is no longer requested. This is not a read-only
 OAuth scope: cloud-write restrictions remain an application policy.
+
+## Google-only runtime network policy
+
+`network_policy.py` is the destination list; no wildcard subdomains or third-party
+fallbacks are allowed. Browser resources may use only these Google-owned hosts:
+`accounts.google.com`, `ssl.gstatic.com`, `www.gstatic.com`, `fonts.gstatic.com`,
+`www.google.com`, `recaptcha.google.com`, and `apis.google.com`. The previous
+YouTube and recaptcha.net aliases are removed. Top-level navigation is still
+only `accounts.google.com`; Google challenge frames are limited to `/recaptcha/`.
+If this prevents a Google login flow, stop rather than silently widen the list.
+
+Both protocol transports now use the same TLS-verified, exact-endpoint adapter:
+auth can only POST to `android.clients.google.com/auth`, and note sync only to
+`notes-pa.clients6.google.com/notes/v1/changes` (the fixed read/write variants).
+Neither inherits environment proxies, netrc, or CA overrides; the adapter
+rejects proxies, unsafe TLS settings and other endpoints before socket creation.
+Redirects are disabled. The one allowed retry is after a definite Keep HTTP 401
+rejection, not an uncertain write.
+
+Browser settings disable DNS prefetch and hyperlink auditing; request policy
+also denies WebSockets, workers/service workers, prefetch, pings/beacons, CSP
+reports, plugins/media, unknown types and navigation-preload channels. Qt uses
+no system proxy. Startup replaces ambient Chromium flags with reviewed flags
+that reduce background networking, restrict DNS resolution to the resource
+list and restrict non-proxied WebRTC UDP; remote debugging and sandbox-disable
+environment overrides are removed. These settings are defense in depth, not
+proof of packet-level isolation of Chromium internals.
+
+Note rendering and HTML conversion cannot load linked resources (including
+remote images, fonts, file and UNC paths). Note links never launch a browser,
+mailer or dialer, even for Google links, since an external app could fetch other
+resources. About uses selectable source/license attribution, not active links.
+The runtime updater's HTTP/download/installer code is removed entirely, not
+just hidden behind a setting. Source/build tools can still contact GitHub,
+PyPI and advisory services separately; they receive no Google credentials.
+
+The anonymous probe reports only allowed resource hostnames, never full URLs,
+query parameters, passwords, tokens, email or note content. This observes
+intercepted page requests, not all OS packets. Windows/DNS, certificate/OS
+services, user-launched apps and a compromised OS/dependency are outside this
+app-level control. Strict process-wide destination enforcement would require
+a separately managed OS/network firewall; it is not claimed here.
+
+## Sync safety
 
 Cloud writes start disabled. Before writing an existing note, the app pulls
 authoritative state and compares it against a persisted baseline. Concurrent
@@ -103,8 +149,9 @@ Keep Qt/Chromium updated through deliberate, tested dependency upgrades.
 
 1. Export Keep with Google Takeout. Use a secondary account initially.
 2. Run from this repository, not an upstream installer. Sign in and verify
-   read-only synchronization before enabling cloud writes in the tray. Leave
-   Remember unchecked unless you explicitly accept retaining a master token.
+   read-only synchronization before enabling cloud writes in the tray. Google
+   sign-in now requires accepting remembered-master-token storage; choose
+   Cancel/offline if you do not accept that risk.
 3. For conflicts, open **View saved recovery copies** to view/copy both
    versions, then **Resolve sync conflicts** to explicitly choose. A removed
    or archived original is not automatically resurrected; copy recovered

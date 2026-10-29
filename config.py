@@ -9,11 +9,9 @@ import winreg
 APP_NAME = "KeepDesktop"
 # Stamped at release time by .github/workflows/release.yml from the
 # git tag (e.g. v2.1.1 → "2.1.1"). Leave this as the dev sentinel in
-# source — do NOT bump manually for releases. "0.0.0" means any real
-# GitHub release will appear newer to the updater, so dev builds get
-# offered the latest installer.
+# source — do NOT bump manually for releases. Runtime update networking is removed.
 APP_VERSION = "0.0.0"
-# GitHub repository (owner/name) used for the auto-updater.
+# Source attribution only; never used for runtime HTTP requests.
 GITHUB_REPO = "TylerBuza/Keep-Desktop"
 # Private builds must never install unsigned upstream binaries over our fixes.
 AUTO_UPDATE_ENABLED = False

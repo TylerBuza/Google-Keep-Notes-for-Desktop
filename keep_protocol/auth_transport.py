@@ -7,13 +7,8 @@ This does not turn the underlying master token into a Keep-only credential.
 
 from __future__ import annotations
 
-import ssl
-
-import certifi
-import requests
-from requests.adapters import HTTPAdapter
-
-AUTH_URL = "https://android.clients.google.com/auth"
+from network_policy import AUTH_URL
+from .transport import GoogleAuthAdapter, google_session
 KEEP_SCOPE = "oauth2:https://www.googleapis.com/auth/memento"
 KEEP_APP = "com.google.android.keep"
 KEEP_SIGNATURE = "38918a453d07199354f8b19af05ec6562ced5788"
@@ -24,31 +19,9 @@ class AuthError(RuntimeError):
     """Only fixed, non-secret diagnostics may cross the auth boundary."""
 
 
-class _GoogleTLSContext(ssl.SSLContext):
-    def set_alpn_protocols(self, protocols):
-        # Google's Android endpoint rejects ALPN in this legacy flow. This
-        # compatibility setting does NOT disable certificate/hostname checks.
-        pass
-
-
-class GoogleAuthAdapter(HTTPAdapter):
-    def init_poolmanager(self, *args, **kwargs):
-        context = _GoogleTLSContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.load_verify_locations(certifi.where())
-        context.options &= ~ssl.OP_NO_TICKET
-        kwargs["ssl_context"] = context
-        kwargs["assert_hostname"] = "android.clients.google.com"
-        super().init_poolmanager(*args, **kwargs)
-
-
 def _post(form: dict) -> dict[str, str]:
     try:
-        with requests.Session() as session:
-            # Do not inherit proxy credentials, .netrc, or environment-supplied
-            # CA paths. Requests still verifies against its trusted CA bundle.
-            session.trust_env = False
-            session.mount("https://", GoogleAuthAdapter(max_retries=0))
+        with google_session(auth=True) as session:
             session.headers.update({"User-Agent": "GoogleAuth/1.4", "Accept-Encoding": "identity"})
             with session.post(AUTH_URL, data=form, verify=True, allow_redirects=False,
                               timeout=(10, 30), stream=True) as response:

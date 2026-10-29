@@ -23,6 +23,8 @@ from typing import Any, Optional
 import requests
 
 from .auth import Credentials, AuthError
+from .transport import google_session
+from network_policy import CHANGES_URL, CHANGES_URL_WRITE
 from .models import Note
 from .nested_model import (
     CheckboxItem,
@@ -36,12 +38,6 @@ from .nested_model import (
     encode_text_diff,
 )
 
-
-CHANGES_URL = "https://notes-pa.clients6.google.com/notes/v1/changes"
-# Public API key Keep web includes on every call. Without it the server
-# returns 400 "Invalid Value" on writes (reads still work).
-_API_KEY = "AIzaSyDE7NHMUZfMoJVu-YNkK-7AXFSuL1Q9gKE"
-CHANGES_URL_WRITE = f"{CHANGES_URL}?alt=json&key={_API_KEY}"
 
 # Capabilities Keep web sends. CL = formatting (docs-nestedModel) opt-in.
 # Sending the same set Keep web sends maximises the chance the server gives
@@ -133,19 +129,24 @@ class KeepClient:
             ),
         }
         try:
-            resp = requests.post(url, headers=headers, json=body, timeout=(10, 30),
-                                 allow_redirects=False)
-            if resp.status_code == 401:
-                # Only a definite rejection is safe to retry. Never replay
-                # writes after timeouts, 429, 5xx or malformed responses.
-                self._bearer = None
-                headers["Authorization"] = f"OAuth {self._get_bearer()}"
-                resp = requests.post(url, headers=headers, json=body, timeout=(10, 30),
-                                     allow_redirects=False)
-            if resp.status_code != 200:
-                raise KeepError(f"Keep request rejected (HTTP {resp.status_code}); sync paused.",
-                                status=resp.status_code)
-            data = resp.json()
+            with google_session() as session:
+                resp = session.post(url, headers=headers, json=body, timeout=(10, 30),
+                                    verify=True, allow_redirects=False)
+                try:
+                    if resp.status_code == 401:
+                        # Only a definite rejection is safe to retry. Never
+                        # replay uncertain writes or follow any redirect.
+                        resp.close()
+                        self._bearer = None
+                        headers["Authorization"] = f"OAuth {self._get_bearer()}"
+                        resp = session.post(url, headers=headers, json=body, timeout=(10, 30),
+                                            verify=True, allow_redirects=False)
+                    if resp.status_code != 200:
+                        raise KeepError(f"Keep request rejected (HTTP {resp.status_code}); sync paused.",
+                                        status=resp.status_code)
+                    data = resp.json()
+                finally:
+                    resp.close()
         except (requests.RequestException, ValueError):
             raise KeepError("Keep request failed or returned invalid JSON; result may be uncertain.") from None
         if not isinstance(data, dict) or data.get("error"):

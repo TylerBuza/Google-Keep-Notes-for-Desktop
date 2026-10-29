@@ -1,19 +1,15 @@
 """Fail-closed navigation and resource policy for experimental Google sign-in."""
 
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
+import threading
+
+from network_policy import AUTH_HOSTS, RESOURCE_HOSTS, allowed_https_url
 
 from PySide6.QtCore import QUrl, Signal
 from PySide6.QtWebEngineCore import (
     QWebEnginePage, QWebEngineSettings, QWebEngineUrlRequestInterceptor,
     QWebEngineUrlRequestInfo,
 )
-
-AUTH_HOSTS = frozenset({"accounts.google.com"})
-RESOURCE_HOSTS = AUTH_HOSTS | frozenset({
-    "accounts.youtube.com", "ssl.gstatic.com", "www.gstatic.com", "fonts.gstatic.com",
-    "www.google.com", "www.recaptcha.net", "recaptcha.google.com", "apis.google.com",
-})
-
 
 def release_auth_profile(profile):
     # Called after the page's complete WebContents teardown. There is no live
@@ -24,23 +20,13 @@ def release_auth_profile(profile):
     profile.deleteLater()
 
 
-def allowed_https_url(value, hosts=AUTH_HOSTS):
-    text = value.toString() if isinstance(value, QUrl) else str(value)
-    try:
-        url = urlsplit(text)
-        return (text == text.strip() and url.scheme.lower() == "https" and url.hostname in hosts
-                and url.port in (None, 443) and url.username is None and url.password is None
-                and "\\" not in text and not any(ord(c) < 32 for c in text))
-    except (ValueError, TypeError):
-        return False
-
-
 def display_address(url):
     if not allowed_https_url(url):
         return "No allowed Google HTTPS page loaded"
     # OAuth URLs can carry credentials/state in their query or fragment.
     # Display the real origin and path, never those sensitive components.
-    path = url.path() if isinstance(url, QUrl) else urlsplit(str(url)).path
+    path = (url.path(QUrl.ComponentFormattingOption.FullyEncoded) if isinstance(url, QUrl)
+            else quote(urlsplit(str(url)).path, safe="/:@!$&'()*+,;=-._~%"))
     return "https://accounts.google.com" + path
 
 
@@ -49,7 +35,7 @@ def allowed_frame_url(url):
         return True
     # Google may require a real CAPTCHA during sign-in. Permit only Google's
     # challenge frames, never arbitrary Google/static-site frames or main pages.
-    challenge_hosts = frozenset({"www.google.com", "www.recaptcha.net"})
+    challenge_hosts = frozenset({"www.google.com", "recaptcha.google.com"})
     if not allowed_https_url(url, challenge_hosts):
         return False
     path = url.path() if isinstance(url, QUrl) else urlsplit(str(url)).path
@@ -62,6 +48,13 @@ class AuthRequestInterceptor(QWebEngineUrlRequestInterceptor):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._reported = set()
+        self._allowed_hosts = set()
+        self._hosts_lock = threading.Lock()
+
+    def observed_hosts(self):
+        """Allowed hostnames only: no URL paths, queries, accounts or secrets."""
+        with self._hosts_lock:
+            return sorted(self._allowed_hosts)
 
     def interceptRequest(self, info):
         url = info.requestUrl()
@@ -71,13 +64,23 @@ class AuthRequestInterceptor(QWebEngineUrlRequestInterceptor):
             allowed = allowed_https_url(url)
         elif kind == resource.ResourceTypeSubFrame:
             allowed = allowed_frame_url(url)
-        else:
+        elif kind in (resource.ResourceTypeStylesheet, resource.ResourceTypeScript,
+                      resource.ResourceTypeImage, resource.ResourceTypeFontResource,
+                      resource.ResourceTypeSubResource, resource.ResourceTypeFavicon,
+                      resource.ResourceTypeXhr, resource.ResourceTypeJson):
             allowed = allowed_https_url(url, RESOURCE_HOSTS)
             # Inline images/fonts are not navigable HTML or executable scripts.
             if (url.scheme() in ("data", "blob") and allowed_https_url(info.firstPartyUrl())
                     and kind in (resource.ResourceTypeImage, resource.ResourceTypeFontResource,
                                  resource.ResourceTypeFavicon)):
                 allowed = True
+        else:
+            # No WebSockets, workers/service workers, prefetch, ping/beacons,
+            # CSP reports, plugins, media or unrecognized future request types.
+            allowed = False
+        if allowed and url.scheme() == "https":
+            with self._hosts_lock:
+                self._allowed_hosts.add(url.host())
         if not allowed:
             info.block(True)
             host = url.host() or url.scheme() or "unknown"
@@ -95,7 +98,10 @@ class GuardedGooglePage(QWebEnginePage):
         attribute = QWebEngineSettings.WebAttribute
         for name in ("JavascriptCanOpenWindows", "JavascriptCanAccessClipboard",
                      "LocalContentCanAccessRemoteUrls", "LocalContentCanAccessFileUrls",
-                     "ScreenCaptureEnabled", "FullScreenSupportEnabled", "ErrorPageEnabled"):
+                     "ScreenCaptureEnabled", "FullScreenSupportEnabled", "ErrorPageEnabled",
+                     "DnsPrefetchEnabled", "HyperlinkAuditingEnabled", "PluginsEnabled",
+                     "AllowRunningInsecureContent", "JavascriptCanPaste", "NavigateOnDropEnabled",
+                     "WebGLEnabled", "PdfViewerEnabled"):
             settings.setAttribute(getattr(attribute, name), False)
         self.certificateError.connect(self._reject_certificate)
         self.permissionRequested.connect(lambda permission: permission.deny())
