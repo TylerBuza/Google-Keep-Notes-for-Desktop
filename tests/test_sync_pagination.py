@@ -96,6 +96,41 @@ def test_sync_loops_through_paginated_full_response():
     assert client.target_version == "v3"
 
 
+def test_completed_terminal_page_can_omit_nodes_without_discarding_earlier_pages():
+    client = _new_client()
+    terminal = {"toVersion": "v3", "truncated": False, "forceFullResync": False}
+    client._post = MagicMock(side_effect=[
+        {"toVersion": "v1", "truncated": True, "nodes": [_make_note_node("1.a", "first")]},
+        {"toVersion": "v2", "truncated": True, "nodes": [_make_note_node("2.b", "second")]},
+        terminal,
+    ])
+    assert client.sync(full=True) is terminal
+    assert set(client.notes) == {"1.a", "2.b"}
+    assert client.target_version == "v3"
+    assert client._post.call_args.args[1]["targetVersion"] == "v2"
+    assert "nodes" not in terminal  # The server payload is not rewritten.
+
+
+def test_empty_incremental_page_without_nodes_retains_cached_notes():
+    client = _new_client()
+    original = MagicMock(raw={"id": "1.original"}, type="NOTE")
+    client.notes["1.original"] = original
+    client.target_version = "v1"
+    client._post = MagicMock(return_value={"toVersion": "v1", "truncated": False})
+    client.sync(full=False)
+    assert client.notes["1.original"] is original
+    assert client.target_version == "v1"
+    assert client._post.call_count == 1
+
+
+def test_completed_empty_account_without_nodes_is_a_valid_empty_sync():
+    client = _new_client()
+    client._post = MagicMock(return_value={"toVersion": "v1", "truncated": False})
+    client.sync(full=True)
+    assert client.notes == {}
+    assert client.target_version == "v1"
+
+
 def test_full_sync_stale_purge_runs_only_after_last_page():
     """Notes that exist in the cache at the start of a full sync but
     appear only on a LATER page must NOT be purged after page 1.

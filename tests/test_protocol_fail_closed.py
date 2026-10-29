@@ -27,7 +27,10 @@ def client():
 
 @pytest.mark.parametrize("data", [None, [], {}, {"nodes": None, "toVersion": "v"},
     {"nodes": [], "toVersion": 123}, {"nodes": [None], "toVersion": "v"},
-    {"nodes": [{"id": 123}], "toVersion": "v"},
+    {"nodes": [{"id": 123}], "toVersion": "v"}, {"nodes": None, "toVersion": "v", "truncated": False},
+    {"toVersion": "v", "truncated": True}, {"toVersion": "v"},
+    {"toVersion": "v", "truncated": "false"}, {"toVersion": "", "truncated": False},
+    {"truncated": False}, {"toVersion": 123, "truncated": False},
     {"nodes": [], "toVersion": "v", "truncated": "false"}])
 def test_changed_schema_cannot_replace_cache_or_advance_cursor(data):
     instance = client()

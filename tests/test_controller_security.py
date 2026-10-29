@@ -107,9 +107,10 @@ def _pull_controller(tmp_path):
     return SimpleNamespace(sync=engine, _notes={note.id: note}, _dirty=set(),
                            _pending_deletes=set(), _last_edit_time={}, _rendered_doc={},
                            _visibility={}, _missing_strikes={}, windows={},
-                           _pending_widget_refresh=set(), _is_note_busy=lambda nid: False,
-                           _refresh_window=MagicMock(), _sync_notice=MagicMock(),
-                           _save_notes_to_disk=MagicMock(), _refresh_manager_if_open=MagicMock())
+                            _pending_widget_refresh=set(), _is_note_busy=lambda nid: False,
+                            _refresh_window=MagicMock(), _sync_notice=MagicMock(),
+                            _save_notes_to_disk=MagicMock(), _refresh_manager_if_open=MagicMock(),
+                            tray=MagicMock())
 
 
 def test_incoming_cloud_changes_save_previous_local_version(tmp_path, qapp):
@@ -141,3 +142,85 @@ def test_private_installer_is_per_user_and_does_not_auto_launch_silently():
     assert 'skipifsilent' in script
     assert '8B1A7C4E-3F2D-4A91-9B2E-2A4D5E6F7A8B' not in script
     assert 'Type: filesandordirs; Name: "{app}"' not in script
+
+
+def test_failed_pull_does_not_masquerade_as_a_successful_empty_notebook(caplog):
+    from keep_protocol.client import KeepError
+    engine = MagicMock()
+    engine.fetch_notes.side_effect = KeepError("dummy-secret-detail")
+    controller = SimpleNamespace(sync=engine, _push_running=True, _dirty=set(),
+        _pending_widget_refresh=set(), _sync_running=True, _read_sync_failed=MagicMock(),
+        _remote_notes_ready=MagicMock())
+    AppController._sync_worker(controller, set())
+    controller._remote_notes_ready.emit.assert_not_called()
+    controller._read_sync_failed.emit.assert_called_once_with()
+    assert controller._sync_running is False
+    assert "dummy-secret-detail" not in caplog.text
+
+
+def test_verified_empty_pull_is_still_delivered_as_a_success():
+    engine = MagicMock()
+    engine.fetch_notes.return_value = []
+    controller = SimpleNamespace(sync=engine, _push_running=True, _dirty=set(),
+        _pending_widget_refresh=set(), _sync_running=True, _read_sync_failed=MagicMock(),
+        _remote_notes_ready=MagicMock())
+    AppController._sync_worker(controller, set())
+    controller._remote_notes_ready.emit.assert_called_once_with([])
+    controller._read_sync_failed.emit.assert_not_called()
+    assert controller._sync_running is False
+
+
+def test_read_failure_pauses_writes_and_notifies_once_without_a_modal(monkeypatch):
+    save = MagicMock()
+    warning = MagicMock()
+    monkeypatch.setattr("app_controller.save_config", save)
+    monkeypatch.setattr("app_controller.QMessageBox.warning", warning)
+    controller = SimpleNamespace(config={"cloud_writes_enabled": True}, sync=MagicMock(),
+        _writes_action=MagicMock(), _update_login_action_text=MagicMock(), tray=MagicMock(),
+        _read_sync_error_active=False)
+    AppController._on_read_sync_failed(controller)
+    AppController._on_read_sync_failed(controller)
+    assert controller.config["cloud_writes_enabled"] is False
+    controller.sync.set_writes_enabled.assert_called_with(False)
+    controller.tray.showMessage.assert_called_once()
+    warning.assert_not_called()
+
+
+def test_interactive_login_opens_manager_only_after_one_verified_pull(tmp_path, qapp, monkeypatch):
+    schedule = MagicMock()
+    monkeypatch.setattr("app_controller.QTimer.singleShot", schedule)
+    controller = _pull_controller(tmp_path)
+    controller._show_manager_after_sync = True
+    controller._show_note_manager_if_not_open = MagicMock()
+    controller._read_sync_error_active = True
+    AppController._apply_remote_notes(controller, [])
+    schedule.assert_called_once_with(0, controller._show_note_manager_if_not_open)
+    assert controller._read_sync_error_active is False
+    assert controller._show_manager_after_sync is False
+    AppController._apply_remote_notes(controller, [])
+    assert schedule.call_count == 1
+
+
+@pytest.mark.parametrize("titled", [False, True])
+def test_manager_renders_note_text_literally_without_html_artifacts(qapp, titled):
+    from app_controller import NoteManagerDialog
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QLabel
+    title_label = QLabel()
+    snippet_label = QLabel()
+    title_label.setTextFormat(Qt.TextFormat.PlainText)
+    snippet_label.setTextFormat(Qt.TextFormat.PlainText)
+    note = KeepNote(id="synthetic", title="Literal <b> & title" if titled else "",
+                    text="Literal <img src='https://not-google.test/x'> & text")
+    controller = SimpleNamespace(_rows={note.id: {"title_lbl": title_label,
+        "snip_lbl": snippet_label, "frame": MagicMock(), "pin_lbl": MagicMock()}})
+    try:
+        NoteManagerDialog._update_row(controller, note)
+        assert title_label.text() == (note.title if titled else note.text[:50])
+        assert title_label.font().bold() is titled
+        assert title_label.font().italic() is not titled
+        if titled:
+            assert snippet_label.text() == note.text
+    finally:
+        title_label.deleteLater()
+        snippet_label.deleteLater()

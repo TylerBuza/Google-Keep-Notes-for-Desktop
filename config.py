@@ -110,6 +110,7 @@ def load_config():
         "cloud_writes_enabled": False,
         "remember_google_account": False,
         "experimental_auth_consent": 0,
+        "start_offline": False,
         # Legacy preference is tolerated for old configs, but the desktop
         # always uses the hardened v2 path and never falls back to gkeepapi.
         "keep_protocol_v2": True,

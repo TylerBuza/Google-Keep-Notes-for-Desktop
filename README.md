@@ -63,7 +63,10 @@ Run this copy from source using the commands below. Upstream installers do
 
 ## Connecting Google Keep
 
-1. Right-click the tray icon → **Sign in to Google Keep**
+1. On first open, the compact sign-in prompt appears automatically. It also
+   returns after a cancelled/failed sign-in. **Use offline** explicitly skips
+   future prompts; sign in later from the tray. Remembered sign-in reconnects
+   automatically when still valid.
 2. Select **Remember on this PC (powerful master token, encrypted)**, then click
    **Continue to Google**. Enter your email only on Google's sign-in page.
    The checkbox is the only storage confirmation. The compact window expands
@@ -76,6 +79,8 @@ Run this copy from source using the commands below. Upstream installers do
    browser, stop—this app offers no security-warning bypass.
 4. On success, the window closes and notes sync into the manager. Cloud writes
    are reset to OFF after each login; enable them separately only after a backup.
+   The manager opens after the first verified download, so you can choose which
+   Google notes appear as desktop windows. Later background syncs do not reopen it.
 
 This is **not** a Google-approved public OAuth integration. After checkbox consent,
 the master token is saved with Windows DPAPI in
@@ -95,9 +100,9 @@ If sign-in fails, `login-validation.json` records only fixed failure categories,
 HTTP status, known Google error codes and safe request metadata. It contains no
 email, password, cookies, tokens, note text or full URLs. Background resource
 blocks appear under Security details rather than as a red login failure.
-The authenticated flow is not yet verified, and a separate browser shutdown
-hang remains under investigation; these changes are not a claim that every
-reported freeze is resolved.
+Google sign-in and read access were verified in a manual test. A final-page
+parsing bug prevented the app from completing the import; that fix still needs
+a manual app retry. A separate browser shutdown hang remains under investigation.
 
 ## Usage
 

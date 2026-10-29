@@ -345,6 +345,7 @@ class LoginDialog(QDialog):
         self._cancelled = threading.Event()
         self._login_started = False
         self._remember_login = False
+        self._offline_requested = False
         self._signin_requested = False
         self._token_cookie_received = False
         self._exchange_attempted = False
@@ -453,9 +454,10 @@ class LoginDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(8, 6, 8, 6)
         if first_launch:
-            skip_btn = QPushButton("Skip – use offline")
+            skip_btn = QPushButton("Use offline")
             skip_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            skip_btn.clicked.connect(self.reject)
+            skip_btn.setToolTip("Skip sign-in on future starts. You can sign in from the tray any time.")
+            skip_btn.clicked.connect(self._use_offline)
             btn_row.addWidget(skip_btn)
         else:
             cancel_btn = QPushButton("Cancel")
@@ -470,6 +472,11 @@ class LoginDialog(QDialog):
 
     def set_keep_sync(self, sync):
         self._keep_sync = sync
+
+    @Slot()
+    def _use_offline(self):
+        self._offline_requested = True
+        self.reject()
 
     @Slot(bool)
     def _toggle_security_details(self, visible):
@@ -1067,14 +1074,18 @@ class NoteManagerDialog(QDialog):
 
         title = note.title or ""
         snippet = (note.text[:120].replace("\n", " ").strip()) if note.text else ""
+        title_font = row["title_lbl"].font()
+        title_font.setBold(bool(title))
+        title_font.setItalic(not bool(title))
+        row["title_lbl"].setFont(title_font)
 
         if title:
-            row["title_lbl"].setText(f"<b>{_escape_html(title)}</b>")
-            row["snip_lbl"].setText(_escape_html(snippet))
+            row["title_lbl"].setText(title)
+            row["snip_lbl"].setText(snippet)
             row["snip_lbl"].setVisible(bool(snippet))
         else:
             row["title_lbl"].setText(
-                f"<i>{_escape_html(snippet[:50]) or '(empty note)'}</i>"
+                snippet[:50] or "(empty note)"
             )
             row["snip_lbl"].setText("")
             row["snip_lbl"].setVisible(False)
@@ -1192,6 +1203,7 @@ class AppController(QObject):
     _sync_conflict = Signal(str)
     _delete_finished = Signal(str, bool)
     _save_requested = Signal()
+    _read_sync_failed = Signal()
 
     def __init__(self):
         super().__init__()
@@ -1223,6 +1235,9 @@ class AppController(QObject):
         self._sync_conflict.connect(self._on_sync_conflict)
         self._delete_finished.connect(self._finish_delete)
         self._save_requested.connect(self._save_notes_to_disk)
+        self._read_sync_failed.connect(self._on_read_sync_failed)
+        self._read_sync_error_active = False
+        self._show_manager_after_sync = False
         self.windows: dict[str, NoteWindow] = {}
         self._notes: dict[str, KeepNote] = {}
         self._dirty: set[str] = set()
@@ -1325,19 +1340,7 @@ class AppController(QObject):
         # Show persisted notes first
         self._show_persisted_notes()
 
-        # Auto-login if we have a stored token
-        email = self.config.get("email", "")
-        if (email and self.config.get("remember_google_account", False)
-                and self.config.get("experimental_auth_consent") == AUTH_CONSENT_VERSION):
-            self._do_login(email)
-
-        # First launch → login dialog; otherwise open notes
-        if not self.sync.is_authenticated and not self.config.get("seen_login", False):
-            self.config["seen_login"] = True
-            save_config(self.config)
-            QTimer.singleShot(300, self._first_launch_login)
-        elif not self.windows and not self.sync.is_authenticated:
-            self._new_note()
+        self._start_initial_session()
 
         # Background update check shortly after startup. Silent on failure
         # / when up-to-date; only prompts the user if a newer version is
@@ -1347,6 +1350,21 @@ class AppController(QObject):
         if AUTO_UPDATE_ENABLED:
             QTimer.singleShot(8000, self._updater.check_async)
         self._manual_update_in_progress = False
+
+    def _start_initial_session(self):
+        # A dismissed or failed prompt is not completed onboarding. Ignore the
+        # legacy seen_login flag; only an explicit offline choice opts out.
+        if self.config.get("start_offline") is True:
+            if not self.windows and not self.sync.is_authenticated:
+                self._new_note()
+            return
+        email = self.config.get("email", "")
+        if (email and self.config.get("remember_google_account") is True
+                and type(self.config.get("experimental_auth_consent")) is int
+                and self.config["experimental_auth_consent"] == AUTH_CONSENT_VERSION):
+            self._do_login(email)
+        if not self.sync.is_authenticated:
+            QTimer.singleShot(300, self._first_launch_login)
 
     def _build_tray_menu(self):
         menu = QMenu()
@@ -1471,6 +1489,24 @@ class AppController(QObject):
         self._writes_action.blockSignals(False)
         self._update_login_action_text()
         QMessageBox.warning(None, "KeepDesktop — sync paused", message)
+
+    @Slot()
+    def _on_read_sync_failed(self):
+        # A failed read is not a successful empty notebook. Pause writes and
+        # report it once, without a modal dialog every periodic retry.
+        self.config["cloud_writes_enabled"] = False
+        self.sync.set_writes_enabled(False)
+        save_config(self.config)
+        self._writes_action.blockSignals(True)
+        self._writes_action.setChecked(False)
+        self._writes_action.blockSignals(False)
+        self._update_login_action_text()
+        self.tray.setToolTip("KeepDesktop — Keep notes could not be loaded")
+        if not self._read_sync_error_active:
+            self._read_sync_error_active = True
+            self.tray.showMessage("KeepDesktop — notes not loaded",
+                "Could not load Keep notes. Local notes are unchanged; use Sync now to retry.",
+                QSystemTrayIcon.MessageIcon.Warning, 8000)
 
     @Slot(str)
     def _on_sync_conflict(self, note_id):
@@ -2211,6 +2247,8 @@ class AppController(QObject):
             self._sync_notice.emit("Stored credentials could not be unlocked. Please sign in again.")
         if ok:
             self.config["email"] = email
+            self.config["start_offline"] = False
+            self._show_manager_after_sync = not any("." in nid for nid in self._notes)
             self.config["notes_account"] = email
             self.config["cloud_writes_enabled"] = False
             self._writes_action.blockSignals(True)
@@ -2221,9 +2259,8 @@ class AppController(QObject):
             self._full_sync()
             self._sync_timer.start(SYNC_INTERVAL_MS)
             self._update_login_action_text()
-            # Don't auto-open the manager on launch — it's noisy when
-            # KeepDesktop is configured to start with Windows. The user
-            # can open it from the tray any time.
+            # Existing notebooks stay quiet on background startup. A first
+            # uncached import opens the manager after its successful pull.
         return ok
 
     def _show_note_manager_if_not_open(self):
@@ -2235,8 +2272,11 @@ class AppController(QObject):
         dlg.set_keep_sync(self.sync)
         accepted = dlg.exec() == QDialog.DialogCode.Accepted and dlg.signed_in
         email, remember = dlg.get_email(), dlg._remember_login
+        offline_requested = dlg._offline_requested
         dlg.deleteLater()
         if accepted:
+            self.config["start_offline"] = False
+            self._show_manager_after_sync = True
             if email:
                 self.config["email"] = email
                 self.config["notes_account"] = email
@@ -2251,9 +2291,11 @@ class AppController(QObject):
             self._full_sync()
             self._sync_timer.start(SYNC_INTERVAL_MS)
             self._update_login_action_text()
-            # Don't auto-open the manager on first install — the tray
-            # message below tells the user where to find it.
+            # The first successful pull opens the manager with loaded notes.
         else:
+            if offline_requested:
+                self.config["start_offline"] = True
+                save_config(self.config)
             if not self.windows:
                 self._new_note()
             self.tray.showMessage(
@@ -2270,6 +2312,8 @@ class AppController(QObject):
         email, remember = dlg.get_email(), dlg._remember_login
         dlg.deleteLater()
         if accepted:
+            self.config["start_offline"] = False
+            self._show_manager_after_sync = True
             if email:
                 self.config["email"] = email
                 self.config["notes_account"] = email
@@ -2284,8 +2328,8 @@ class AppController(QObject):
             self._full_sync()
             self._sync_timer.start(SYNC_INTERVAL_MS)
             self._update_login_action_text()
-            QMessageBox.information(None, "KeepDesktop", "Signed in! Your notes are syncing.")
-            QTimer.singleShot(500, self._show_note_manager_if_not_open)
+            # Open the manager only after a verified pull, not on a timer that
+            # can show an empty list while the first download is still running.
 
     def _full_sync(self, force_resync: bool = False):
         """Run one push+pull cycle in the background.
@@ -2358,9 +2402,10 @@ class AppController(QObject):
                         self._dirty | busy_ids | self._pending_widget_refresh
                     ),
                 )
-            except Exception:  # noqa: BLE001
-                log.exception("fetch_notes crashed; skipping pull this cycle")
-                remote_notes = []
+            except Exception as error:  # noqa: BLE001
+                log.warning("Keep read failed (%s)", type(error).__name__)
+                self._read_sync_failed.emit()
+                return
             # Hand back to main thread via signal (QTimer.singleShot from a
             # worker thread is unreliable / silently dropped).
             log.info("Sync worker emitting %d remote notes to main thread",
@@ -2371,6 +2416,8 @@ class AppController(QObject):
 
     def _apply_remote_notes(self, remote_notes: list):
         """Apply remote note data on the main thread."""
+        self._read_sync_error_active = False
+        self.tray.setToolTip("KeepDesktop")
         from sync_merge import decide_merge, MergeAction
         log.info("Applying %d remote notes (local dirty=%s)",
                  len(remote_notes), [d[:8] for d in self._dirty])
@@ -2570,10 +2617,12 @@ class AppController(QObject):
         self._save_notes_to_disk()
         self._refresh_manager_if_open()
 
-        # We deliberately do NOT auto-open the manager when remote sync
-        # brings in new notes — it would pop up unexpectedly during
-        # background syncs and on every launch. The tray notification
-        # below covers the discoverability case for the first sync.
+        if getattr(self, "_show_manager_after_sync", False):
+            self._show_manager_after_sync = False
+            QTimer.singleShot(0, self._show_note_manager_if_not_open)
+
+        # Later background pulls do not reopen the manager. The one-shot flag
+        # is armed only by interactive login or a first uncached import.
 
     def _manager_dialog_open(self) -> bool:
         dlg = getattr(self, "_manager_dlg", None)

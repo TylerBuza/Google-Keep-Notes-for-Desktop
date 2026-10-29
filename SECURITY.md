@@ -17,7 +17,8 @@ Email is entered only on Google's page. The initial token exchange omits the
 Email field rather than guessing or posting an empty value. It must return a
 valid Google account identity before bearer minting or credential persistence.
 There is no DOM/form scraping, URL-derived identity or local email fallback.
-Compatibility of this identity-returning exchange still requires a user test.
+The user completed this identity-returning sign-in; bearer issuance was verified
+through non-secret validation metadata, without inspecting the identity or token.
 
 The experimental login window does not load Google's page until consent. It
 displays the HTTPS origin and path (not secret query/fragment values), permits
@@ -64,7 +65,36 @@ as the legacy plain-text protocol. A valid Google-returned email is mandatory.
 An isolated successful synthetic hand-off remains responsive and closes its
 page/profile, but explicit application destruction can still hang. A cancel-only
 probe exits normally. This separate WebEngine shutdown issue is unresolved;
-neither authenticated sign-in nor the user's reported freeze is claimed fixed.
+the user's reported freeze is not claimed fixed.
+
+## Startup and read-only import
+
+Startup without a signed-in account opens the compact prompt by default. The legacy
+`seen_login` flag no longer treats a failed or dismissed prompt as completed
+onboarding. Only **Use offline** persists `start_offline: true`; that preference
+also skips automatic stored-token login. Successful sign-in clears it. Existing
+valid remembered sessions reconnect normally. Merely showing the prompt does
+not check consent or load Google's page.
+
+A user-approved read-only diagnostic followed Keep's pagination and inspected
+only fixed root field types/control flags, never note contents, note counts,
+identity/token/cursor values, or stored note caches. Authentication/read access
+succeeded. The final page omitted `nodes` while explicitly returning
+`truncated: false` and a nonempty string cursor. The client had incorrectly
+rejected this valid empty repeated field and rolled back the earlier pages.
+
+The parser now accepts omitted `nodes` only on an explicitly complete page,
+with the existing valid-cursor checks. Explicit null, wrong types, missing or
+invalid cursor, and incomplete/ambiguous omitted-node pages still fail closed.
+All-page rollback, pagination bounds, stale-state protection and write
+acknowledgment validation are unchanged. No write-acknowledgment requirement
+was relaxed. The corrected import still needs a manual app retry.
+
+Failed reads no longer emit a fake successful empty notebook. They retain
+local data, pause writes and show a deduplicated non-modal notification. The
+note manager opens once after a verified interactive/first uncached download;
+new Google notes remain hidden as floating windows until selected by the user.
+No existing local notes are deleted to make room for an import.
 
 The auth transport only POSTs to `https://android.clients.google.com/auth`, with
 TLS >=1.2, certificate and hostname validation, a pinned CA-bundle dependency,

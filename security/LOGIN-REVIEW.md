@@ -146,20 +146,51 @@ A credential-free empty-form POST reached the fixed Google auth endpoint with
 verified TLS and returned HTTP 403. This establishes reachability only, not the
 cause of the user's authenticated failure. No account credentials were submitted.
 
-**Authenticated end-to-end login is still pending user participation.** No
-Google password/2FA prompt has been completed by the agent. To complete it:
+## Manual sign-in and first-import findings
+
+The user subsequently completed Google sign-in in private.5. Non-secret files
+confirmed `login_succeeded` and `bearer_issued`, encrypted-master retention and
+cloud writes OFF. `keep_api_verified` was still false because the app's complete
+read/import had not passed its validation. No password/2FA prompt was completed
+by the agent and no account identity or token value was displayed.
+
+The user explicitly authorized a read-only schema check using the saved login.
+It used only the fixed Google changes endpoint with no write nodes. Only root
+field types and pagination control flags were inspected/returned; no note
+contents, IDs, counts, identity, tokens or cursor values were displayed. It
+confirmed successful Google read access and identified a terminal page with
+omitted `nodes`, a nonempty string `toVersion`, and `truncated: false` after
+an earlier paginated response. The client incorrectly rejected that terminal
+page and rolled back the downloaded state.
+
+Omitted nodes are now treated as an empty repeated field only when the page
+explicitly marks completion and the existing cursor/schema checks pass. Null
+and invalid node types, ambiguous/incomplete pages and invalid cursors remain
+errors. Tests preserve the earlier pages, incremental cached notes, transactional
+rollback and strict write acknowledgments. Read failures no longer masquerade
+as successful empty pulls. The manager opens once after a verified first
+download so the user can choose desktop-visible notes.
+
+Default unsigned startup now prompts automatically until successful sign-in
+or an explicit **Use offline** choice. Failed/cancelled attempts do not suppress
+onboarding. An isolated fresh-start GUI probe showed the compact dialog with
+consent unchecked, browser hidden and Google sign-in not started; it exited
+cleanly without credentials or actual Google requests. **585 offline tests**
+passed. These startup/import changes do not resolve the separate shutdown hang.
+
+**The corrected full import still needs a manual app retry.** To complete it:
 
 1. Install the new private build and leave cloud writes OFF. Decide whether
    you accept saving the powerful master token; otherwise stay offline.
-2. Read/accept the experimental warning, verify the Google origin, and enter
-   credentials/2FA yourself. Prefer a secondary account. Do not paste tokens
-   into chat or bypass any Google warning.
+2. Use the automatic prompt or tray sign-in, select Remember, verify the Google
+   origin, and complete prompts yourself if needed. Do not paste tokens into
+   chat or bypass any Google warning.
 3. Confirm that read-only Keep sync succeeds. The agent may inspect only the
    non-secret validation booleans/retention mode, not notes or credentials.
 4. After a successful remembered sign-in, verify reconnect after a graceful
    restart, then sign out and verify saved credentials are cleared and startup
    no longer signs in. Never show the token file or its decrypted contents.
 
-Until that user step passes, this report must not be described as a completed
-authenticated-login test or a certification that the app is safe for a primary
-Google account.
+Until the import/shutdown checks pass, this report must not be described as
+completed end-to-end verification or certification that the app is safe for a
+primary Google account. Successful authentication alone is not verified sync.

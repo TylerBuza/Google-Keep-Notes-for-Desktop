@@ -334,12 +334,18 @@ class KeepClient:
                 first_page = True
                 continue
 
-            if (not isinstance(data.get("nodes"), list)
+            nodes = data.get("nodes")
+            if "nodes" not in data and data.get("truncated") is False:
+                # Google's completed page can omit an empty repeated field,
+                # including the final page after earlier pages carried notes.
+                # Null/wrong types and incomplete/ambiguous pages still fail.
+                nodes = []
+            if (not isinstance(nodes, list)
                     or not isinstance(data.get("toVersion"), str)
                     or not data["toVersion"]
                     or not isinstance(data.get("truncated", False), bool)):
                 raise KeepError("Keep sync schema changed; cache unchanged and writes refused.")
-            for node in data["nodes"]:
+            for node in nodes:
                 if (not isinstance(node, dict) or not isinstance(node.get("id"), str)
                         or not node["id"] or not isinstance(node.get("type", "NOTE"), str)):
                     raise KeepError("Keep returned malformed note data; cache unchanged.")
@@ -351,7 +357,7 @@ class KeepClient:
 
             self.target_version = data.get("toVersion") or self.target_version
 
-            for n in data.get("nodes", []):
+            for n in nodes:
                 nid = n.get("id", "")
                 ntype = n.get("type", "NOTE")
                 if ntype in ("NOTE", "LIST"):
