@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 
 from keep_protocol.nested_model import u16_len
 from native_resources import LocalNoteDocument
+from ui_typography import crisp_font
+from content_sizing import body_height, chrome_height
 from config import (
     KEEP_COLORS, KEEP_COLORS_DARK, DEFAULT_WIDTH, DEFAULT_HEIGHT,
     MIN_WIDTH, MIN_HEIGHT, set_position, get_position,
@@ -30,15 +32,15 @@ from config import (
 # when their own set_font_scale() is called (see NoteWindow.set_font_scale).
 FONT_SCALE = 1.0
 
-BASE_BODY_PT = 10.0
-BASE_H1_PT = 16.0
-BASE_H2_PT = 13.0
-BASE_TOOLBAR_BTN_PT = 9.0
-BASE_TITLE_PT = 10.0
+BASE_BODY_PT = 12.0
+BASE_H1_PT = 20.0
+BASE_H2_PT = 16.0
+BASE_TOOLBAR_BTN_PT = 10.0
+BASE_TITLE_PT = 12.0
 BASE_TITLEBAR_BTN_PX = 14
-BASE_CHECKLIST_PT = 10.0
-BASE_CHARCOUNT_PX = 9
-BASE_BULLET_PX = 14
+BASE_CHECKLIST_PT = 12.0
+BASE_CHARCOUNT_PX = 11
+BASE_BULLET_PX = 17
 
 
 def set_font_scale(scale: float):
@@ -316,7 +318,7 @@ class FormattingToolbar(QWidget):
 
     def _make_btn(self, label, weight=None, italic=False, underline=False, strikeout=False):
         btn = QPushButton(label)
-        f = QFont("Segoe UI", round(_scaled_pt(BASE_TOOLBAR_BTN_PT)))
+        f = crisp_font(QFont("Segoe UI", round(_scaled_pt(BASE_TOOLBAR_BTN_PT))))
         if weight:
             f.setWeight(weight)
         f.setItalic(italic)
@@ -349,7 +351,7 @@ class FormattingToolbar(QWidget):
             (self.strike_btn, {"strikeout": True}),
             (self.clear_fmt_btn, {}),
         ):
-            f = QFont("Segoe UI", pt)
+            f = crisp_font(QFont("Segoe UI", pt))
             if kwargs.get("weight"):
                 f.setWeight(kwargs["weight"])
             f.setItalic(kwargs.get("italic", False))
@@ -661,7 +663,7 @@ class TitleBar(QWidget):
         # the tail of long titles.
         self.title_edit.setCursorPosition(0)
         self.title_edit.setFont(
-            QFont("Segoe UI", round(_scaled_pt(BASE_TITLE_PT)), QFont.Weight.Bold)
+            crisp_font(QFont("Segoe UI", round(_scaled_pt(BASE_TITLE_PT)), QFont.Weight.Bold))
         )
         self.title_edit.setStyleSheet(
             "QLineEdit { color: #222; background: transparent; border: none;"
@@ -727,7 +729,7 @@ class TitleBar(QWidget):
         """Re-apply the current global FONT_SCALE to the title font and
         the pin/colour/close button glyph size."""
         self.title_edit.setFont(
-            QFont("Segoe UI", round(_scaled_pt(BASE_TITLE_PT)), QFont.Weight.Bold)
+            crisp_font(QFont("Segoe UI", round(_scaled_pt(BASE_TITLE_PT)), QFont.Weight.Bold))
         )
         self._restyle_widgets()
 
@@ -896,7 +898,7 @@ class NoteTextEdit(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDocument(LocalNoteDocument(self))
-        self.setFont(QFont("Segoe UI", round(_scaled_pt(BASE_BODY_PT))))
+        self.setFont(crisp_font(QFont("Segoe UI", round(_scaled_pt(BASE_BODY_PT)))))
         self.setAcceptRichText(True)
         # Qt's built-in HTML renderer applies font-weight:bold to <h1>
         # and <h2> by default. Keep web does NOT — headings there are
@@ -1380,6 +1382,8 @@ class EdgeResizeHandle(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = event.globalPosition().toPoint()
+            if ("n" in self._edge or "s" in self._edge) and hasattr(self.window(), "set_auto_size"):
+                self.window().set_auto_size(False)
             event.accept()
 
     def mouseMoveEvent(self, event):
@@ -1567,7 +1571,7 @@ class ChecklistRow(QFrame):
         self.line.setStyleSheet(
             "QLineEdit { background: transparent; border: none; padding: 2px; }"
         )
-        self.line.setFont(QFont("Segoe UI", round(_scaled_pt(BASE_CHECKLIST_PT))))
+        self.line.setFont(crisp_font(QFont("Segoe UI", round(_scaled_pt(BASE_CHECKLIST_PT)))))
         self.line.textEdited.connect(self._on_text_edited)
         self.line.enter_pressed.connect(self._on_enter)
         self.line.backspace_at_start.connect(self._on_backspace_at_start)
@@ -1740,7 +1744,7 @@ class ChecklistEditor(QScrollArea):
         """Re-apply the current global FONT_SCALE to every row's text."""
         pt = round(_scaled_pt(BASE_CHECKLIST_PT))
         for r in self._rows:
-            r.line.setFont(QFont("Segoe UI", pt))
+            r.line.setFont(crisp_font(QFont("Segoe UI", pt)))
 
     def focus_first_empty(self):
         for r in self._rows:
@@ -2090,6 +2094,7 @@ class NoteWindow(QWidget):
         self._syncing = False  # flag to suppress change signals during sync
         self._show_in_taskbar = show_in_taskbar
         self._is_list = bool(list_items)
+        self._auto_size = False
 
         # Explicit per-window icon. QApplication's windowIcon usually
         # cascades, but on Windows the taskbar reads the per-window icon
@@ -2214,6 +2219,14 @@ class NoteWindow(QWidget):
             self.resize(pos["w"], pos["h"])
         else:
             self.resize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
+
+        self._auto_size = (pos or {}).get("auto_size", True)
+        self._content_fit_timer = QTimer(self)
+        self._content_fit_timer.setSingleShot(True)
+        self._content_fit_timer.timeout.connect(self._fit_content)
+        self.text_edit.document().documentLayout().documentSizeChanged.connect(
+            lambda size: self._schedule_content_fit())
+        self.checklist_editor.changed.connect(self._schedule_content_fit)
 
         # Default focus should land in the body, not the title.
         self.text_edit.setFocus()
@@ -2372,7 +2385,7 @@ class NoteWindow(QWidget):
         self.title_bar.set_font_scale()
         self.fmt_toolbar.set_font_scale()
         self.checklist_editor.set_font_scale()
-        self.text_edit.setFont(QFont("Segoe UI", round(_scaled_pt(BASE_BODY_PT))))
+        self.text_edit.setFont(crisp_font(QFont("Segoe UI", round(_scaled_pt(BASE_BODY_PT)))))
         if not self._is_list:
             from keep_sync_v2 import html_to_styled_doc
             doc = html_to_styled_doc(self.text_edit.toHtml())
@@ -2571,7 +2584,37 @@ class NoteWindow(QWidget):
         set_position(
             self.note_id, geo.x(), geo.y(), geo.width(), geo.height(),
             pinned=getattr(self.title_bar, "_pinned", False),
+            auto_size=self._auto_size,
         )
+
+    def set_auto_size(self, enabled):
+        self._auto_size = bool(enabled)
+        if enabled:
+            self._schedule_content_fit()
+        elif hasattr(self, "_content_fit_timer"):
+            self._content_fit_timer.stop()
+
+    def _schedule_content_fit(self):
+        if self._auto_size and hasattr(self, "_content_fit_timer"):
+            self._content_fit_timer.start(0)
+
+    def _fit_content(self):
+        if not self._auto_size or not self.isVisible():
+            return
+        body = self.checklist_editor if self._is_list else self.text_edit
+        desired = chrome_height(self.container.layout(), body, self.width()) + body_height(body)
+        screen = self.screen()
+        maximum = 900
+        if screen is not None:
+            available = screen.availableGeometry()
+            maximum = max(MIN_HEIGHT, min(available.height() - 24, available.bottom() - self.y() - 8))
+        height = max(MIN_HEIGHT, min(maximum, desired))
+        if self.height() != height:
+            self.resize(self.width(), height)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._schedule_content_fit()
 
     def moveEvent(self, event):
         super().moveEvent(event)
@@ -2585,6 +2628,8 @@ class NoteWindow(QWidget):
         if hasattr(self, "_resize_handles"):
             self._position_resize_handles()
         self._schedule_geometry_save()
+        if event.size().width() != event.oldSize().width():
+            self._schedule_content_fit()
 
     def _position_resize_handles(self):
         m = _RESIZE_MARGIN
@@ -2647,6 +2692,12 @@ class NoteWindow(QWidget):
         menu = QMenu(self)
         menu.setStyleSheet(_LIGHT_MENU_QSS)
         delete_action = menu.addAction("🗑  Delete note")
+        fit_action = menu.addAction("Fit height to content")
+        fit_action.setCheckable(True)
+        fit_action.setChecked(self._auto_size)
         chosen = menu.exec(event.globalPos())
         if chosen == delete_action:
             self.note_deleted.emit(self.note_id)
+        elif chosen == fit_action:
+            self.set_auto_size(fit_action.isChecked())
+            self.save_geometry()

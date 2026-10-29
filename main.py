@@ -10,6 +10,7 @@ configure_browser_network()
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
+from ui_typography import crisp_font
 
 from config import ensure_data_dir, APP_NAME, APP_VERSION, DATA_DIR
 from app_icon import make_icon
@@ -67,6 +68,7 @@ def main():
     _set_windows_app_id()
 
     app = QApplication(sys.argv)
+    app.setFont(crisp_font(app.font()))
     app.setQuitOnLastWindowClosed(False)   # keep running in tray
     app.setApplicationName("KeepDesktop")
     app.setWindowIcon(make_icon())

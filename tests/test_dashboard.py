@@ -586,7 +586,8 @@ def test_desktop_pin_sets_always_on_top_without_dirtying_google_metadata(monkeyp
     note = KeepNote(id="1.test", pinned=False)
     window = MagicMock()
     ctl = SimpleNamespace(_notes={note.id: note}, _visibility={}, windows={},
-        _create_window=MagicMock(return_value=window), _regroup_window=MagicMock(), _dirty=set())
+        _create_window=MagicMock(return_value=window), _regroup_window=MagicMock(), _dirty=set(),
+        _save_notes_to_disk=MagicMock())
     monkeypatch.setattr("app_controller._save_visibility", MagicMock())
     monkeypatch.setattr("app_controller.QTimer.singleShot", MagicMock())
     AppController._on_manager_visibility_changed(ctl, note.id, True)

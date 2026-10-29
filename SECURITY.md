@@ -113,6 +113,14 @@ note edit. Dark card display never rewrites wire colors. Desktop pins only set
 local visibility/window geometry and always-on-top state, not Keep pin metadata.
 Existing desktop visibility and per-note floating themes are retained.
 
+Editors use the same local dark palette as cards, without rewriting wire colors.
+First-time desktop pop-outs default to that palette; existing local choices are
+not overwritten. Default text is larger, with grayscale font antialiasing/full
+hinting. Popup and desktop auto-height measure native document/checklist layout,
+cap at available space, and scroll long content. Manual vertical desktop resizing
+opts that window out of auto-height until the user re-enables it. These operations
+change display/geometry only, never mark note content dirty or fetch resources.
+
 Drafts commit on the user-requested close actions: outside/backdrop or logo
 clicks, Close, or Escape (and Save in a dashboard-exit prompt). Opening/reading
 a popup is not an edit. Only edited fields are committed; title-only edits
@@ -196,7 +204,17 @@ a separately managed OS/network firewall; it is not claimed here.
 
 ## Sync safety
 
-Cloud writes start disabled. Before writing an existing note, the app pulls
+Cloud writes start disabled. From private.9, an explicit write opt-in records
+`cloud_writes_consent_version: 1`. That preference may survive a successful
+reconnect only when the saved notebook owner matches the Google-verified account,
+the flag is exactly true, the consent version is the supported integer, and no
+write-pause marker exists. Old session-only flags do not grant persistent writes.
+Signing out resets the grant. Read/auth/write failures still disable writes;
+reconnecting never clears an uncertain-write marker or automatically replays a
+possibly completed create. This changes consent persistence, not endpoint,
+fresh-read, conflict, recovery, acknowledgment or anti-replay safeguards.
+
+Before writing an existing note, the app pulls
 authoritative state and compares it against a persisted baseline. Concurrent
 changes, including formatting, title and checklist changes, produce an
 encrypted conflict copy rather than an automatic winner. Both sides can be

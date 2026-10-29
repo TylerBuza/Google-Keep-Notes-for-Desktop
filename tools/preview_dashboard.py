@@ -12,7 +12,8 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--width", type=int, default=1180)
     parser.add_argument("--height", type=int, default=800)
-    parser.add_argument("--editor", choices=("text", "checklist"))
+    parser.add_argument("--editor", choices=("text", "checklist", "short", "long"))
+    parser.add_argument("--two-way", action="store_true", help="Show fictional sync-on UI; never connects")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="keep-dashboard-") as data:
         os.environ["APPDATA"] = data
@@ -41,13 +42,17 @@ def main():
         ]
         notes = {note.id: note for note in samples}
         dashboard = NoteManagerDialog(notes, {"demo-1": True})
-        dashboard.set_sync_state(True, False)
+        dashboard.set_sync_state(True, args.two_way)
         dashboard.resize(args.width, args.height)
         dashboard.show()
         target = dashboard
         editor = None
         if args.editor:
-            editor = dashboard.create_editor(samples[1] if args.editor == "checklist" else samples[0])
+            sample = samples[1] if args.editor == "checklist" else samples[0]
+            if args.editor in ("short", "long"):
+                sample = KeepNote(id="demo-sizing", title="Quick thought", color_hex="#AECBFA",
+                                  text="One small idea." if args.editor == "short" else "A fictional line.\n" * 60)
+            editor = dashboard.create_editor(sample)
             editor.save_requested.connect(lambda changes: editor.accept())
             dashboard.show_editor()
         for _ in range(8):

@@ -98,7 +98,24 @@ def test_failed_signout_still_disables_startup_login_and_writes(monkeypatch):
     assert "email" not in controller.config
     assert controller.config["sync_enabled"] is False
     assert controller.config["cloud_writes_enabled"] is False
+    assert controller.config["cloud_writes_consent_version"] == 0
     save.assert_called_once_with(controller.config)
+
+
+@pytest.mark.parametrize("accept", [False, True])
+def test_only_explicit_two_way_toggle_records_persistent_write_consent(monkeypatch, accept):
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr("app_controller.QMessageBox.question", lambda *args:
+        QMessageBox.StandardButton.Yes if accept else QMessageBox.StandardButton.No)
+    monkeypatch.setattr("app_controller.save_config", MagicMock())
+    engine = MagicMock()
+    engine.pause_file.exists.return_value = False
+    ctl = SimpleNamespace(sync=engine, config={}, _writes_action=MagicMock(),
+        _update_dashboard_sync_state=MagicMock(), _full_sync=MagicMock())
+    AppController._toggle_cloud_writes(ctl, True)
+    assert ctl.config["cloud_writes_enabled"] is accept
+    assert (ctl.config.get("cloud_writes_consent_version") == 1) is accept
+    assert ctl._full_sync.call_count == int(accept)
 
 
 def _pull_controller(tmp_path):

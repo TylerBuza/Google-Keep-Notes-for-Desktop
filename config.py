@@ -57,7 +57,7 @@ KEEP_COLORS = {
 # KEEP_COLORS above. Picking a dark variant flips ``KeepNote.dark_mode``
 # but leaves ``color_hex`` pointing at the light value Keep understands.
 KEEP_COLORS_DARK = {
-    "White":    "#3C4043",
+    "White":    "#202124",
     "Red":      "#5C2B29",
     "Orange":   "#614A19",
     "Yellow":   "#635D19",
@@ -108,6 +108,7 @@ def load_config():
         "always_on_top": False,
         "opacity": 0.95,
         "cloud_writes_enabled": False,
+        "cloud_writes_consent_version": 0,
         "remember_google_account": False,
         "experimental_auth_consent": 0,
         "start_offline": False,
@@ -141,12 +142,14 @@ def get_position(note_id):
     return positions.get(note_id, None)
 
 
-def set_position(note_id, x, y, w, h, pinned=None):
+def set_position(note_id, x, y, w, h, pinned=None, auto_size=None):
     positions = load_positions()
     entry = positions.get(note_id, {}) or {}
     entry.update({"x": x, "y": y, "w": w, "h": h})
     if pinned is not None:
         entry["pinned"] = bool(pinned)
+    if auto_size is not None:
+        entry["auto_size"] = bool(auto_size)
     positions[note_id] = entry
     save_positions(positions)
 

@@ -22,7 +22,7 @@ def card_color(wire_color):
 
 STYLE = """
 QDialog { background: #202124; color: #e8eaed; }
-QWidget { color: #e8eaed; font-family: 'Segoe UI'; font-size: 14px; }
+QWidget { color: #e8eaed; font-family: 'Segoe UI'; font-size: 16px; }
 QLabel { background: transparent; }
 QPushButton { background: transparent; border: none; border-radius: 5px;
               padding: 8px 14px; text-align: left; }

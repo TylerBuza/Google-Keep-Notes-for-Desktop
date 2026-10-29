@@ -19,7 +19,9 @@ private standalone repository because GitHub public forks cannot be private.
   that clears both stored credentials and in-memory access. Login cookies
   use an off-the-record browser profile.
 - **Cloud writes are OFF initially.** Export a Google Takeout backup first,
-  then opt in via the tray's **Enable Google Keep writes** toggle.
+  then opt in via **Two-way Google Keep sync (text, pins, checklists)** in the tray.
+  New explicit consent is remembered for the same account across reconnects;
+  sign-out, read failures and uncertain writes still disable writing.
 - **Fail-safe sync:** reject malformed/incomplete responses, roll back failed
   paginated pulls, refuse writes against stale/unverified state, and pause
   after uncertain writes. A persistent write-intent marker also pauses after
@@ -52,7 +54,7 @@ Run this copy from source using the commands below. Upstream installers do
 ## Features
 
 - **One window per note** — drag them anywhere on screen
-- **Remembers positions** — every window reopens exactly where you left it
+- **Remembers positions** — preserves desktop placement and manual sizes; auto-height follows content
 - **Experimental Google Keep sync** — read/import, with guarded writes opt-in only
 - **System tray** — lives quietly in your taskbar tray
 - **Auto-start** — optional "Start with Windows" toggle
@@ -86,6 +88,13 @@ by Google. Asset provenance is recorded in `keep_brand.py`.
   just pins. Pin-only uploads use guarded metadata writes, not body rewrites.
 - Color display uses local dark equivalents without changing cloud note colors.
   Explicit color selection is a normal edit, still subject to cloud-write opt-in.
+- Popups match the card's dark color and fit their content: short notes stay
+  compact, growing notes expand up to the app's available height and then scroll.
+  Desktop notes also auto-fit height without changing their width/placement.
+  Manually dragging a top/bottom/corner resize handle keeps that height; turn
+  **Fit height to content** back on from the desktop note's context menu.
+- Default card/editor/floating-note text is larger. Native fonts use grayscale
+  antialiasing and full hinting to reduce colored fringes on fractional-DPI screens.
 - More actions include reorder, delete (with confirmation), and type conversion
   for local notes only. Failed/blocked deletes leave the card present.
 
@@ -112,7 +121,9 @@ enable writes or change remembered-login security.
    Complete Google's password/2FA prompts yourself. If Google blocks the embedded
    browser, stop—this app offers no security-warning bypass.
 4. On success, the window closes and notes sync into the manager. Cloud writes
-   are reset to OFF after each login; enable them separately only after a backup.
+   default to OFF. A new explicit two-way-sync opt-in persists only for the same
+   account; older session-only write flags do not silently become persistent.
+   Review/back up queued edits before opting in. Uncertain writes still pause.
    The manager opens after the first verified download, so you can choose which
    Google notes appear as desktop windows. Later background syncs do not reopen it.
 
@@ -153,7 +164,7 @@ hang remains under investigation.
 | **Delete a note** | Right-click the note body → "Delete note" |
 | **Manage notes** | Double-click tray icon |
 | **Sync now** | Right-click tray → "Sync now" |
-| **Enable cloud changes** | Tray → "Enable Google Keep writes" (opt-in) |
+| **Enable cloud changes** | Tray → "Two-way Google Keep sync (text, pins, checklists)" (opt-in) |
 | **Choose conflicting version** | Tray → "Resolve sync conflicts…" |
 | **Recover older text** | Tray → "View saved recovery copies…" |
 | **Auto-start** | Right-click tray → "Start with Windows" |

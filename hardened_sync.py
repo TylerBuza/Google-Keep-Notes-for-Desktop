@@ -26,6 +26,8 @@ from keep_protocol.nested_model import (
 from secure_storage import save_protected, load_protected
 from keep_protocol.auth import AUTH_CONSENT_VERSION, SessionCredentials
 
+WRITE_CONSENT_VERSION = 1
+
 
 def snapshot(note: KeepNote) -> dict:
     doc = None if note.is_list else getattr(note, "styled_doc", None)
@@ -95,16 +97,23 @@ class HardenedKeepSync(KeepSyncV2):
                                remember=remember, consent=consent, android_id=android_id,
                                cancel_event=cancel_event)
             if ok:
-                self.writes_enabled = False
+                # Persistent opt-in is deliberately new. Old one-session
+                # flags alone cannot silently authorize writes on reconnect.
+                self.writes_enabled = (
+                    cfg.get("cloud_writes_enabled") is True
+                    and type(cfg.get("cloud_writes_consent_version")) is int
+                    and cfg["cloud_writes_consent_version"] == WRITE_CONSENT_VERSION
+                    and bool(owner) and owner.casefold() == email.casefold()
+                    and not self.pause_file.exists())
                 cfg["notes_account"] = email
                 cfg["remember_google_account"] = remember
                 cfg["experimental_auth_consent"] = AUTH_CONSENT_VERSION
-                cfg["cloud_writes_enabled"] = False
+                cfg["cloud_writes_enabled"] = self.writes_enabled
                 self._login_validation = {
                     "at": datetime.now(timezone.utc).isoformat(), "bearer_issued": True,
                     "keep_api_verified": False, "requested_scope": "https://www.googleapis.com/auth/memento",
                     "retention": "encrypted-master" if remember else "memory-only-keep-bearer",
-                    "cloud_writes_enabled": False,
+                    "cloud_writes_enabled": self.writes_enabled,
                 }
                 try:
                     save_config(cfg)

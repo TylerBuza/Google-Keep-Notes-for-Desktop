@@ -3,7 +3,7 @@
 from copy import deepcopy
 import uuid
 
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtCore import Qt, Signal, QSize, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog, QWidget, QFrame, QLabel, QLineEdit, QPushButton, QScrollArea,
@@ -16,6 +16,8 @@ from app_icon import make_icon
 from keep_brand import keep_logo
 from dashboard_theme import STYLE, BACKGROUND, MUTED, ACCENT, card_color, icon
 from note_window import NoteTextEdit, ChecklistEditor, FormattingToolbar
+from ui_typography import crisp_font
+from content_sizing import body_height, chrome_height
 
 
 def plain_label(text="", parent=None):
@@ -47,6 +49,7 @@ class NoteEditorDialog(QDialog):
 
     save_requested = Signal(object)
     dismiss_requested = Signal()
+    content_size_changed = Signal()
 
     def __init__(self, note, *, is_new=False, embedded=False, parent=None):
         super().__init__(parent)
@@ -54,12 +57,15 @@ class NoteEditorDialog(QDialog):
         if embedded:
             self.setWindowFlags(Qt.WindowType.Widget)
         self.setObjectName("noteEditor")
-        self.setStyleSheet(STYLE + "QDialog#noteEditor { border: 1px solid #5f6368; border-radius: 8px; }")
+        self.setFont(crisp_font(self.font()))
+        self._display_color = card_color(note.color_hex)
+        self.setStyleSheet(STYLE + f"QDialog#noteEditor {{ background: {self._display_color};"
+                          "border: 1px solid #5f6368; border-radius: 8px; }")
         self.setWindowTitle("New note" if is_new else "Edit note")
         self.setWindowIcon(make_icon())
         self.setWindowModality(Qt.WindowModality.NonModal)
-        self.resize(600, 460)
-        self.setMinimumSize(380, 300)
+        self.resize(600, 220)
+        self.setMinimumSize(380, 180)
         self.note_id = note.id
         self.base = edit_snapshot(note)
         self.is_new = is_new
@@ -69,7 +75,7 @@ class NoteEditorDialog(QDialog):
         self.title_edit = QLineEdit(note.title)
         self.title_edit.setPlaceholderText("Title")
         self.title_edit.setAccessibleName("Note title")
-        self.title_edit.setStyleSheet("font-size: 20px; padding: 4px 8px;")
+        self.title_edit.setStyleSheet("font-size: 22px; padding: 4px 8px;")
         layout.addWidget(self.title_edit)
 
         self.text_edit = NoteTextEdit(self)
@@ -83,7 +89,7 @@ class NoteEditorDialog(QDialog):
             self.text_edit.setPlainText(note.text)
         self.text_edit.setStyleSheet(
             "QTextEdit { background: transparent; color: #e8eaed; border: none;"
-            "padding: 8px; selection-color: #ffffff; selection-background-color: #394b68; }")
+            "font-size: 17px; padding: 8px; selection-color: #ffffff; selection-background-color: #394b68; }")
         self.text_edit.setPlaceholderText("Take a note…")
         self.text_edit.setAccessibleName("Note text")
         self._rendered_body = (self.text_edit.toPlainText(), self.text_edit.toHtml())
@@ -96,7 +102,7 @@ class NoteEditorDialog(QDialog):
         layout.addWidget(self.checklist_editor, 1)
         self.checklist_editor.setVisible(note.is_list)
         self.text_edit.setVisible(not note.is_list)
-        self.toolbar = FormattingToolbar(self.text_edit, "#FFFFFF", self)
+        self.toolbar = FormattingToolbar(self.text_edit, self._display_color, self)
         self.toolbar.set_dark(True)
         self.toolbar.setVisible(not note.is_list)
         layout.addWidget(self.toolbar)
@@ -108,6 +114,7 @@ class NoteEditorDialog(QDialog):
         footer = QHBoxLayout()
         hint = plain_label("Click outside or Close to save locally · cloud writes require opt-in"
                            if embedded else "Save stores locally · cloud writes require separate opt-in")
+        self._save_hint = hint
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
         footer.addWidget(hint, 1)
@@ -123,6 +130,23 @@ class NoteEditorDialog(QDialog):
         footer.addWidget(save)
         layout.addLayout(footer)
         QShortcut(QKeySequence("Ctrl+Return"), self, activated=save.click)
+        self.text_edit.document().documentLayout().documentSizeChanged.connect(
+            lambda size: self.content_size_changed.emit())
+        self.checklist_editor.changed.connect(self.content_size_changed.emit)
+        self.title_edit.textChanged.connect(lambda text: self.content_size_changed.emit())
+
+    def fit_height(self, maximum):
+        body = self.checklist_editor if self._is_list else self.text_edit
+        chrome = chrome_height(self.layout(), body, self.width())
+        height = min(maximum, max(180, chrome + body_height(body)))
+        body.setFixedHeight(max(32, height - chrome))
+        self.setFixedHeight(height)
+
+    def set_sync_state(self, authenticated, writes_enabled):
+        action = "Click outside or Close to save" if self._embedded else "Save changes"
+        self._save_hint.setText(action + (" · two-way sync on" if authenticated and writes_enabled
+                                          else " locally · web writes off"))
+        self.content_size_changed.emit()
 
     def changes(self):
         changes = {}
@@ -143,6 +167,7 @@ class NoteEditorDialog(QDialog):
     def show_error(self, message):
         self.error.setText(message)
         self.error.show()
+        self.content_size_changed.emit()
 
     def reject(self):
         if self.changes():
@@ -196,17 +221,21 @@ class NoteEditorOverlay(QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(24, 24, 24, 24)
         self._layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.timeout.connect(self._fit_editor)
 
     def set_editor(self, editor):
         self.editor = editor
         self._layout.addWidget(editor, 0, Qt.AlignmentFlag.AlignCenter)
         editor.dismiss_requested.connect(self.dismiss_requested.emit)
+        editor.content_size_changed.connect(lambda: self._fit_timer.start(0))
         self._fit_editor()
 
     def _fit_editor(self):
         if self.editor is not None:
-            self.editor.setFixedSize(min(600, max(380, self.width() - 48)),
-                                     min(460, max(300, self.height() - 48)))
+            self.editor.setFixedWidth(min(600, max(380, self.width() - 48)))
+            self.editor.fit_height(max(180, self.height() - 48))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -259,7 +288,7 @@ class NoteCard(QFrame):
         self.title.setWordWrap(True)
         self.title.setMaximumHeight(72)
         self.title.setMinimumWidth(0)
-        self.title.setStyleSheet("font-size: 16px; font-weight: 500;")
+        self.title.setStyleSheet("font-size: 20px; font-weight: 500;")
         self.title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         top.addWidget(self.title, 1)
         # A hidden (untitled) QLabel contributes no stretch. Keep an expanding
@@ -273,12 +302,12 @@ class NoteCard(QFrame):
         self.body.setWordWrap(True)
         self.body.setMaximumHeight(230)
         self.body.setMinimumWidth(0)
-        self.body.setStyleSheet("font-size: 14px;")
+        self.body.setStyleSheet("font-size: 17px;")
         self.body.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         layout.addWidget(self.body)
         self.labels = plain_label()
         self.labels.setWordWrap(True)
-        self.labels.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
+        self.labels.setStyleSheet(f"color: {MUTED}; font-size: 13px;")
         self.labels.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         layout.addWidget(self.labels)
         actions = QHBoxLayout()
@@ -401,6 +430,7 @@ class NoteManagerDialog(QDialog):
     def __init__(self, notes, visibility, font_scale=1.0, parent=None):
         super().__init__(parent)
         self.setObjectName("dashboard")
+        self.setFont(crisp_font(self.font()))
         self.setWindowTitle("KeepDesktop")
         self.setWindowIcon(make_icon())
         self.setStyleSheet(STYLE)
@@ -559,7 +589,7 @@ class NoteManagerDialog(QDialog):
     @staticmethod
     def _section_label(text):
         label = plain_label(text)
-        label.setStyleSheet(f"color: {MUTED}; font-size: 11px; font-weight: 600; padding-left: 8px;")
+        label.setStyleSheet(f"color: {MUTED}; font-size: 14px; font-weight: 600; padding-left: 8px;")
         return label
 
     def _add_nav(self, key, text, image):
@@ -610,15 +640,19 @@ class NoteManagerDialog(QDialog):
         return page
 
     def set_sync_state(self, authenticated, writes_enabled):
+        self._authenticated = authenticated
+        self._writes_enabled = writes_enabled
         if authenticated and writes_enabled:
             self._pin_status.hide()
         if not authenticated:
             text = "Offline · edits are saved locally"
         elif not writes_enabled:
-            text = "Cloud writes off · edits are saved locally · enable writes separately in the tray menu"
+            text = "Read-only sync · edits stay local · enable two-way sync in the tray menu to upload"
         else:
-            text = "Cloud writes enabled · changes use guarded Keep sync"
+            text = "Two-way sync on · text, checklists, Keep pins and colors sync with Google Keep"
         self._status.setText(text)
+        if self._editor is not None:
+            self._editor.set_sync_state(authenticated, writes_enabled)
 
     def show_pin_notice(self, message):
         self._pin_status.setText(message)
@@ -648,6 +682,7 @@ class NoteManagerDialog(QDialog):
         overlay = NoteEditorOverlay(self)
         overlay.setGeometry(self.rect())
         editor = NoteEditorDialog(note, is_new=is_new, embedded=True, parent=overlay)
+        editor.set_sync_state(self._authenticated, self._writes_enabled)
         overlay.set_editor(editor)
         overlay.dismiss_requested.connect(self._return_to_notes)
         self._editor = editor

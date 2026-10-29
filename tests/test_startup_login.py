@@ -10,7 +10,7 @@ from keep_protocol.auth import AUTH_CONSENT_VERSION
 
 def startup_controller(config=None, *, authenticated=False, windows=None):
     return SimpleNamespace(config=dict(config or {}),
-                           sync=SimpleNamespace(is_authenticated=authenticated),
+                           sync=SimpleNamespace(is_authenticated=authenticated, writes_enabled=False),
                            windows=windows or {}, _do_login=MagicMock(),
                            _first_launch_login=MagicMock(), _new_note=MagicMock())
 
@@ -118,6 +118,20 @@ def test_successful_signin_clears_the_offline_startup_preference(monkeypatch, me
     assert controller.config["cloud_writes_enabled"] is False
     controller._full_sync.assert_called_once()
     assert controller._show_manager_after_sync is True
+
+
+@pytest.mark.parametrize("method", [AppController._first_launch_login, AppController._show_login])
+def test_login_ui_preserves_an_authorized_backend_write_state(monkeypatch, method):
+    dialog = MagicMock(signed_in=True, _remember_login=True, _offline_requested=False)
+    dialog.exec.return_value = QDialog.DialogCode.Accepted
+    dialog.get_email.return_value = "test@example.test"
+    monkeypatch.setattr("app_controller.LoginDialog", MagicMock(return_value=dialog))
+    monkeypatch.setattr("app_controller.save_config", MagicMock())
+    controller = login_controller()
+    controller.sync.writes_enabled = True
+    method(controller)
+    assert controller.config["cloud_writes_enabled"] is True
+    controller._writes_action.setChecked.assert_called_with(True)
 
 
 @pytest.mark.parametrize("has_cloud_cache", [False, True])

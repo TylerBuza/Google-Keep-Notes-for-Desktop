@@ -53,6 +53,56 @@ def test_read_only_default_blocks_every_mutation(sync):
     assert_no_cloud_write(sync)
 
 
+@pytest.mark.parametrize("enabled,version,owner,expected", [
+    (True, 1, "test@example.test", True),
+    (False, 1, "test@example.test", False),
+    (True, 0, "test@example.test", False),
+    (True, True, "test@example.test", False),
+    (True, "1", "test@example.test", False),
+    (True, 2, "test@example.test", False),
+    ("true", 1, "test@example.test", False),
+    (True, 1, None, False),
+])
+def test_only_new_explicit_account_bound_write_consent_survives_login(
+        sync, monkeypatch, enabled, version, owner, expected):
+    cfg = {"notes_account": owner, "cloud_writes_enabled": enabled,
+           "cloud_writes_consent_version": version}
+    saved = MagicMock()
+    monkeypatch.setattr("hardened_sync.load_config", lambda: cfg)
+    monkeypatch.setattr("hardened_sync.save_config", saved)
+    monkeypatch.setattr("hardened_sync.save_json", MagicMock())
+    monkeypatch.setattr("keep_sync_v2.KeepSyncV2.login", lambda *args, **kwargs: True)
+    assert sync.login("test@example.test", master_token="synthetic", remember=True, consent=True)
+    assert sync.writes_enabled is expected
+    assert cfg["cloud_writes_enabled"] is expected
+    assert sync._login_validation["cloud_writes_enabled"] is expected
+
+
+def test_persistent_write_consent_cannot_clear_an_uncertain_write_on_login(sync, monkeypatch):
+    cfg = {"notes_account": "test@example.test", "cloud_writes_enabled": True,
+           "cloud_writes_consent_version": 1}
+    sync._start_write("synthetic-uncertain-create")
+    monkeypatch.setattr("hardened_sync.load_config", lambda: cfg)
+    monkeypatch.setattr("hardened_sync.save_config", MagicMock())
+    monkeypatch.setattr("hardened_sync.save_json", MagicMock())
+    monkeypatch.setattr("keep_sync_v2.KeepSyncV2.login", lambda *args, **kwargs: True)
+    assert sync.login("test@example.test", master_token="synthetic", remember=True, consent=True)
+    assert not sync.writes_enabled
+    assert sync.pause_file.exists()
+    assert cfg["cloud_writes_enabled"] is False
+
+
+def test_persistent_consent_is_not_transferred_to_another_account(sync, monkeypatch):
+    cfg = {"notes_account": "old@example.test", "cloud_writes_enabled": True,
+           "cloud_writes_consent_version": 1}
+    auth = MagicMock()
+    monkeypatch.setattr("hardened_sync.load_config", lambda: cfg)
+    monkeypatch.setattr("keep_sync_v2.KeepSyncV2.login", auth)
+    assert sync.login("new@example.test", master_token="synthetic", remember=True, consent=True) is False
+    assert sync.writes_enabled is False
+    auth.assert_not_called()
+
+
 @pytest.mark.parametrize("kind", ["plain", "formatted", "checklist"])
 @pytest.mark.parametrize("pinned", [False, True])
 def test_pin_only_uses_guarded_metadata_write_not_body_diff(sync, kind, pinned):

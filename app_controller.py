@@ -943,7 +943,7 @@ class AppController(QObject):
         sync_action.triggered.connect(self._manual_sync)
         menu.addAction(sync_action)
 
-        self._writes_action = QAction("Enable Google Keep writes", menu)
+        self._writes_action = QAction("Two-way Google Keep sync (text, pins, checklists)", menu)
         self._writes_action.setCheckable(True)
         self._writes_action.setChecked(self.sync.writes_enabled)
         self._writes_action.toggled.connect(self._toggle_cloud_writes)
@@ -1035,6 +1035,9 @@ class AppController(QObject):
             enabled = answer == QMessageBox.StandardButton.Yes
         self.sync.set_writes_enabled(enabled)
         self.config["cloud_writes_enabled"] = enabled
+        if enabled:
+            from hardened_sync import WRITE_CONSENT_VERSION
+            self.config["cloud_writes_consent_version"] = WRITE_CONSENT_VERSION
         save_config(self.config)
         self._writes_action.blockSignals(True)
         self._writes_action.setChecked(enabled)
@@ -1273,7 +1276,7 @@ class AppController(QObject):
 
     def _new_note(self):
         note_id = str(uuid.uuid4())
-        note = KeepNote(id=note_id, color_hex="#FFF475")
+        note = KeepNote(id=note_id, color_hex="#FFF475", dark_mode=True)
         self._notes[note_id] = note
         self._dirty.add(note_id)
         self._visibility[note_id] = True
@@ -1596,6 +1599,12 @@ class AppController(QObject):
         win = self.windows.get(note_id)
         if is_visible:
             if win is None:
+                from config import get_position
+                if not get_position(note_id):
+                    # Initial pop-outs match the dashboard without modifying
+                    # the Google color or an existing local theme choice.
+                    note.dark_mode = True
+                    self._save_notes_to_disk()
                 win = self._create_window(note)
                 self.windows[note_id] = win
             win.title_bar.set_pinned(True)
@@ -1887,6 +1896,7 @@ class AppController(QObject):
         self._sync_timer.stop()
         self._sync_debounce.stop()
         self.config["cloud_writes_enabled"] = False
+        self.config["cloud_writes_consent_version"] = 0
         self._writes_action.blockSignals(True)
         self._writes_action.setChecked(False)
         self._writes_action.blockSignals(False)
@@ -1933,9 +1943,9 @@ class AppController(QObject):
             self.config["start_offline"] = False
             self._show_manager_after_sync = not any("." in nid for nid in self._notes)
             self.config["notes_account"] = email
-            self.config["cloud_writes_enabled"] = False
+            self.config["cloud_writes_enabled"] = self.sync.writes_enabled is True
             self._writes_action.blockSignals(True)
-            self._writes_action.setChecked(False)
+            self._writes_action.setChecked(self.config["cloud_writes_enabled"])
             self._writes_action.blockSignals(False)
             self.config["sync_enabled"] = True
             save_config(self.config)
@@ -1965,9 +1975,9 @@ class AppController(QObject):
                 self.config["notes_account"] = email
             self.config["remember_google_account"] = remember
             self.config["experimental_auth_consent"] = AUTH_CONSENT_VERSION
-            self.config["cloud_writes_enabled"] = False
+            self.config["cloud_writes_enabled"] = self.sync.writes_enabled is True
             self._writes_action.blockSignals(True)
-            self._writes_action.setChecked(False)
+            self._writes_action.setChecked(self.config["cloud_writes_enabled"])
             self._writes_action.blockSignals(False)
             self.config["sync_enabled"] = True
             save_config(self.config)
@@ -2002,9 +2012,9 @@ class AppController(QObject):
                 self.config["notes_account"] = email
             self.config["remember_google_account"] = remember
             self.config["experimental_auth_consent"] = AUTH_CONSENT_VERSION
-            self.config["cloud_writes_enabled"] = False
+            self.config["cloud_writes_enabled"] = self.sync.writes_enabled is True
             self._writes_action.blockSignals(True)
-            self._writes_action.setChecked(False)
+            self._writes_action.setChecked(self.config["cloud_writes_enabled"])
             self._writes_action.blockSignals(False)
             self.config["sync_enabled"] = True
             save_config(self.config)
