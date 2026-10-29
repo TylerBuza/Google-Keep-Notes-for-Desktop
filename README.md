@@ -64,8 +64,8 @@ Run this copy from source using the commands below. Upstream installers do
 ## Connecting Google Keep
 
 1. Right-click the tray icon → **Sign in to Google Keep**
-2. Read **Remember on this PC — saves a powerful master token, encrypted**.
-   Acknowledge saving the credential, click **Continue to Google**, and confirm.
+2. Select **Remember on this PC (powerful master token, encrypted)**.
+   Read **Security details** if needed, click **Continue to Google**, and confirm.
    Choose No/Cancel to stay offline; there is no session-only desktop option.
 3. Verify the displayed address starts with `https://accounts.google.com`.
    Complete Google's password/2FA prompts yourself. If Google blocks the embedded

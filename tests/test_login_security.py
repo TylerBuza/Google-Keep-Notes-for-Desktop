@@ -91,8 +91,15 @@ def test_login_only_remembers_after_consent_and_confirmation(qapp, monkeypatch):
         assert dialog._origin.isReadOnly()
         assert dialog.metaObject().indexOfSlot("_on_cookie(QNetworkCookie)") >= 0
         assert not dialog._remember_login
-        assert "Remember on this PC" in dialog._retention_info.text()
-        assert "45" not in dialog._retention_info.text() + dialog._retention_details.text()
+        assert "Remember on this PC" in dialog._risk_consent.text()
+        assert "powerful master token, encrypted" in dialog._risk_consent.text()
+        assert len(dialog._warning.text()) < 60
+        assert "45" not in dialog._warning.text() + dialog._retention_details.text()
+        assert dialog._retention_details.isHidden()
+        dialog._details_btn.click()
+        assert not dialog._retention_details.isHidden()
+        dialog._details_btn.click()
+        assert dialog._retention_details.isHidden()
         assert not dialog._risk_consent.isChecked()
         navigate.assert_not_called()
         dialog._begin_signin()

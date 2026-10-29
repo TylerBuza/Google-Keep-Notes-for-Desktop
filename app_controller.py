@@ -353,11 +353,8 @@ class LoginDialog(QDialog):
         layout.setSpacing(0)
 
         # No network sign-in page loads before explicit informed consent.
-        info = QLabel(
-            "Experimental Google login — not a Google-approved OAuth client. "
-            "Uses a powerful Google master token, not just Keep-only permission. "
-            "Google sign-in in this build remembers your account on this PC."
-        )
+        info = QLabel("Experimental sign-in — not Google-approved.")
+        self._warning = info
         info.setTextFormat(Qt.TextFormat.PlainText)
         info.setStyleSheet(
             "background: #E8F0FE; color: #1A73E8; padding: 8px;"
@@ -366,19 +363,16 @@ class LoginDialog(QDialog):
         info.setWordWrap(True)
         layout.addWidget(info)
 
-        self._retention_info = QLabel(
-            "Remember on this PC — saves a powerful master token, encrypted.\n\n"
-            "Stay signed in across app restarts. The app renews Keep access with Google as needed, "
-            "until you sign out or Google rejects/revokes access. There is no fixed app time limit "
-            "and no guaranteed number of days."
-        )
-        self._retention_info.setTextFormat(Qt.TextFormat.PlainText)
-        self._retention_info.setWordWrap(True)
-        self._retention_info.setStyleSheet("padding: 8px; color: #333; background: #F1F3F4; font-size: 12px;")
-        self._retention_info.setAccessibleName("Selected sign-in duration and credential storage")
-        layout.addWidget(self._retention_info)
+        self._risk_consent = QCheckBox("Remember on this PC (powerful master token, encrypted)")
+        layout.addWidget(self._risk_consent)
+        self._details_btn = QPushButton("Security details")
+        self._details_btn.setCheckable(True)
+        layout.addWidget(self._details_btn)
         self._retention_details = QLabel(
-            "Windows encryption protects the saved token on disk, not from malware running as you. "
+            "Sign-in saves a powerful Google master token, not just Keep-only permission. "
+            "Keep access renews across restarts until sign-out or Google's rejection/revocation. "
+            "There is no fixed app time limit or guaranteed number of days.\n\n"
+            "Windows encryption protects the token on disk, not from malware running as you. "
             "Signing out removes this app's saved credential but does not revoke it at Google. "
             "Revoke the device/session in Google Account Security if needed.\n\n"
             "Only allowlisted Google-owned HTTPS destinations are permitted by the app. "
@@ -388,9 +382,9 @@ class LoginDialog(QDialog):
         self._retention_details.setTextFormat(Qt.TextFormat.PlainText)
         self._retention_details.setWordWrap(True)
         self._retention_details.setStyleSheet("padding: 8px; font-size: 12px;")
+        self._retention_details.hide()
+        self._details_btn.toggled.connect(self._retention_details.setVisible)
         layout.addWidget(self._retention_details)
-        self._risk_consent = QCheckBox("I understand and agree to save the master token on this PC")
-        layout.addWidget(self._risk_consent)
         self._continue_btn = QPushButton("Continue to Google")
         self._continue_btn.setEnabled(False)
         self._risk_consent.toggled.connect(self._continue_btn.setEnabled)
@@ -466,9 +460,8 @@ class LoginDialog(QDialog):
             return
         answer = QMessageBox.question(
             self, "Remember Google on this PC?",
-            "Save the powerful, long-lived Google master token encrypted for your Windows user? "
-            "The app will renew Keep access and reconnect after restarts. Malware running as you "
-            "may read the token. Choose No to stay offline; sign-in will not start.",
+            "Save the powerful Google master token on this PC? Windows encryption "
+            "does not protect it from malware running as you.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

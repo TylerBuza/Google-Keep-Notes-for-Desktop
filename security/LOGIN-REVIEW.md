@@ -19,6 +19,8 @@ unofficial Android flow is not Google-approved. If Google blocks it, stop.
 
 - Explicit risk consent before loading the sign-in page; visible allowed
   HTTPS origin/path; no secret URL query/fragment displayed or logged.
+  The warning is one line; the visible remember checkbox names the powerful,
+  encrypted master token. The longer explanation is under **Security details**.
 - Exact `accounts.google.com` top-level navigation allowlist and separate restricted
   authentication/static-resource allowlist. No arbitrary third-party frames,
   executable data URLs, popups, downloads or certificate-error overrides.
