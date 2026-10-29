@@ -12,7 +12,7 @@ jobs:
           python-version: '3.13'
           cache: pip
           cache-dependency-path: requirements.lock
-      - run: python -m pip install -r requirements.lock
+      - run: python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
       - name: Tests (no live Google access)
         env:
           QT_QPA_PLATFORM: offscreen

@@ -17,6 +17,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineProfile
+from login_security import (GuardedGooglePage, AuthRequestInterceptor, display_address,
+                            allowed_https_url, release_auth_profile)
+from keep_protocol.auth import AUTH_CONSENT_VERSION
 
 from config import (
     load_config, save_config, set_autostart, is_autostart_enabled, save_token,
@@ -27,7 +30,7 @@ from config import (
 from app_icon import make_icon as _make_icon
 import note_window
 from note_window import NoteWindow
-from keep_sync import KeepSync, KeepNote
+from note_model import KeepNote
 from updater import UpdateChecker, prompt_and_install
 
 log = logging.getLogger(__name__)
@@ -337,6 +340,9 @@ class LoginDialog(QDialog):
         self.signed_in = False
         self._keep_sync = None
         self._captured_token = None
+        self._cancelled = threading.Event()
+        self._login_started = False
+        self._remember_login = False
         self._signals = _LoginSignals()
         self._signals.result.connect(self._on_login_result)
         self._signals.token_found.connect(self._on_token_found)
@@ -345,11 +351,14 @@ class LoginDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Info bar at top
+        # No network sign-in page loads before explicit informed consent.
         info = QLabel(
-            "  Sign in with your Google account below. "
-            "KeepDesktop will capture the token automatically."
+            "Experimental Google login — not a Google-approved OAuth client. "
+            "This flow temporarily obtains a powerful Google master token. By default, "
+            "only a Keep-scoped access token stays in memory for at most 45 minutes, "
+            "then you must sign in again. Local sign-out does not revoke Google's token."
         )
+        info.setTextFormat(Qt.TextFormat.PlainText)
         info.setStyleSheet(
             "background: #E8F0FE; color: #1A73E8; padding: 8px;"
             "font-size: 12px;"
@@ -357,8 +366,26 @@ class LoginDialog(QDialog):
         info.setWordWrap(True)
         layout.addWidget(info)
 
+        self._risk_consent = QCheckBox("I understand and want to use experimental Google sign-in")
+        layout.addWidget(self._risk_consent)
+        self._remember = QCheckBox("Remember on this PC (saves a powerful master token, encrypted)")
+        self._remember.setChecked(False)
+        layout.addWidget(self._remember)
+        self._continue_btn = QPushButton("Continue to Google")
+        self._continue_btn.setEnabled(False)
+        self._risk_consent.toggled.connect(self._continue_btn.setEnabled)
+        self._continue_btn.clicked.connect(self._begin_signin)
+        layout.addWidget(self._continue_btn)
+
+        self._origin = QLineEdit("Not connected — sign-in has not started")
+        self._origin.setReadOnly(True)
+        self._origin.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        self._origin.setAccessibleName("Google sign-in origin and path (queries hidden)")
+        layout.addWidget(self._origin)
+
         # Status label (hidden until needed)
         self.status_label = QLabel("")
+        self.status_label.setTextFormat(Qt.TextFormat.PlainText)
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("padding: 8px; font-size: 12px;")
         self.status_label.hide()
@@ -366,15 +393,26 @@ class LoginDialog(QDialog):
 
         # Embedded browser
         # An unnamed profile is off-the-record; Google cookies stay in memory.
-        self._profile = QWebEngineProfile(self)
+        self._profile = QWebEngineProfile(QApplication.instance())
+        self._profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
+        self._profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.MemoryHttpCache)
+        self._profile.setPersistentPermissionsPolicy(QWebEngineProfile.PersistentPermissionsPolicy.StoreInMemory)
+        self._profile.setSpellCheckEnabled(False)
+        self._profile.downloadRequested.connect(lambda download: download.cancel())
         self._profile.cookieStore().cookieAdded.connect(self._on_cookie)
+        self._interceptor = AuthRequestInterceptor(self._profile)
+        self._profile.setUrlRequestInterceptor(self._interceptor)
+        self._interceptor.blocked.connect(self._on_login_blocked)
 
         self._browser = QWebEngineView()
-        page = self._browser.page()
-        from PySide6.QtWebEngineCore import QWebEnginePage
-        new_page = QWebEnginePage(self._profile, self._browser)
+        new_page = GuardedGooglePage(self._profile, self._browser)
+        # A profile must outlive the *complete* page destructor. Delete it on
+        # the next event-loop turn after the page, not as a child of the page.
+        new_page.destroyed.connect(partial(release_auth_profile, self._profile))
+        new_page.blocked.connect(self._on_login_blocked)
         self._browser.setPage(new_page)
-        self._browser.setUrl(QUrl(EMBEDDED_SETUP_URL))
+        self._browser.urlChanged.connect(self._on_url_changed)
+        self._browser.loadFinished.connect(self._on_page_loaded)
         layout.addWidget(self._browser, stretch=1)
 
         # Give the browser keyboard focus so Enter goes to the web page
@@ -395,87 +433,100 @@ class LoginDialog(QDialog):
             btn_row.addWidget(cancel_btn)
         btn_row.addStretch()
 
-        # Manual token paste fallback
-        self._paste_btn = QPushButton("Paste token manually…")
-        self._paste_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._paste_btn.setStyleSheet("font-size: 11px; color: #666;")
-        self._paste_btn.clicked.connect(self._show_manual_input)
-        btn_row.addWidget(self._paste_btn)
-
         layout.addLayout(btn_row)
+        self.finished.connect(self._cleanup_signin)
 
-        # Hidden manual input row
-        self._manual_frame = QFrame()
-        self._manual_frame.hide()
-        manual_layout = QHBoxLayout(self._manual_frame)
-        manual_layout.setContentsMargins(8, 0, 8, 8)
-
-        # Email input for manual flow
-        self._manual_email = QLineEdit()
-        self._manual_email.setPlaceholderText("Email")
-        self._manual_email.setFixedWidth(160)
-        manual_layout.addWidget(self._manual_email)
-
-        self._manual_input = QLineEdit()
-        self._manual_input.setPlaceholderText("Paste oauth_token cookie value here")
-        manual_layout.addWidget(self._manual_input)
-        submit_btn = QPushButton("Submit")
-        submit_btn.clicked.connect(self._on_manual_submit)
-        manual_layout.addWidget(submit_btn)
-        layout.addWidget(self._manual_frame)
-
-    def set_keep_sync(self, sync: KeepSync):
+    def set_keep_sync(self, sync):
         self._keep_sync = sync
 
-    def _show_manual_input(self):
-        self._manual_frame.setVisible(not self._manual_frame.isVisible())
+    def _begin_signin(self):
+        if not self._risk_consent.isChecked() or self._login_started:
+            return
+        if self._remember.isChecked():
+            answer = QMessageBox.question(
+                self, "Save a Google master token?",
+                "This retains a powerful, long-lived Google credential on this PC. "
+                "Windows encryption does not protect against malware running as you. "
+                "Session-only sign-in is safer. Remember this account anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self._remember.setChecked(False)
+        self._remember_login = self._remember.isChecked()
+        self._login_started = True
+        self._remember.setEnabled(False)
+        self._risk_consent.setEnabled(False)
+        self._continue_btn.setEnabled(False)
+        self._browser.setUrl(QUrl(EMBEDDED_SETUP_URL))
+        self._browser.setFocus()
+
+    @Slot(str)
+    def _on_login_blocked(self, message):
+        self._show_status(message, error=True)
+
+    @Slot(QUrl)
+    def _on_url_changed(self, url):
+        self._origin.setText(display_address(url))
+
+    @Slot(bool)
+    def _on_page_loaded(self, success):
+        if self._captured_token or not self._login_started:
+            return
+        if success and allowed_https_url(self._browser.url()):
+            self._show_status("Google HTTPS sign-in page loaded. Verify the address above.")
+        else:
+            self._show_status("Google sign-in could not load securely. Do not bypass a warning; "
+                              "Google may block this experimental embedded flow.", error=True)
+
+    def _cleanup_signin(self, result):
+        self._login_started = False
+        accepted = result == QDialog.DialogCode.Accepted and self.signed_in
+        if not accepted:
+            self._cancelled.set()
+        self._browser.stop()
+        self._browser.hide()
+        page = self._browser.page()
+        page.setVisible(False)
+        page.setLifecycleState(page.LifecycleState.Discarded)
+        # Keep filtering requests until the page is actually destroyed.
+        # release_auth_profile then detaches the IO hook and deletes profile.
+        self._profile.cookieStore().deleteAllCookies()
+        self._captured_token = None
+        if not accepted:
+            if self._keep_sync and self._keep_sync.is_authenticated:
+                try:
+                    self._keep_sync.logout()
+                except Exception:
+                    pass  # logout disables in-memory access even on storage failure.
 
     def _on_cookie(self, cookie):
         """Called for every cookie set by the embedded browser."""
+        if not self._login_started or self._cancelled.is_set():
+            return
         name = bytes(cookie.name()).decode("utf-8", errors="replace")
         domain = cookie.domain().lstrip(".").lower()
         if (name == "oauth_token" and domain in ("accounts.google.com", "google.com")
                 and cookie.isSecure() and not self._captured_token):
             value = bytes(cookie.value()).decode("utf-8", errors="replace")
-            if value:
+            if value.startswith("oauth2_4/") and len(value) <= 16384:
                 self._captured_token = value
                 self._signals.token_found.emit(value)
 
     @Slot(str)
     def _on_token_found(self, oauth_token):
         """OAuth cookie captured — exchange it for a master token."""
-        self._browser.setHtml(
-            "<html><body style='display:flex;align-items:center;"
-            "justify-content:center;height:100vh;font-family:Segoe UI;'>"
-            "<div style='text-align:center'>"
-            "<h2>Token captured!</h2>"
-            "<p>Exchanging for master token…</p>"
-            "</div></body></html>"
-        )
-        self._paste_btn.setEnabled(False)
-
-        # Try to extract email from cookies or the page URL
-        email = self._manual_email.text().strip()
-        threading.Thread(
-            target=self._exchange_worker, args=(email, oauth_token), daemon=True
-        ).start()
-
-    def _on_manual_submit(self):
-        token = self._manual_input.text().strip()
-        email = self._manual_email.text().strip()
-        if not token:
-            self._show_status("Please paste the oauth_token value.", error=True)
+        if self._cancelled.is_set():
             return
-        self._captured_token = token
-        self._paste_btn.setEnabled(False)
-        self._show_status("Exchanging token…", error=False)
+        self._browser.stop()
+        self._show_status("Completing Google token exchange securely…")
         threading.Thread(
-            target=self._exchange_worker, args=(email, token), daemon=True
+            target=self._exchange_worker, args=("", oauth_token), daemon=True
         ).start()
 
     def _exchange_worker(self, email, oauth_token):
         """Runs in a background thread: exchange oauth_token → master_token → login."""
-        if not self._keep_sync:
+        if self._cancelled.is_set() or not self._keep_sync:
             self._signals.result.emit(False, "Internal error: no sync object.")
             return
 
@@ -483,8 +534,7 @@ class LoginDialog(QDialog):
         if not resp:
             self._signals.result.emit(
                 False,
-                "Token exchange failed. Please try again, or use "
-                "'Paste token manually' with your email and token."
+                "Google did not allow this experimental token exchange. No manual token bypass is offered."
             )
             return
 
@@ -492,12 +542,21 @@ class LoginDialog(QDialog):
         # Google returns the canonical email in the response; prefer that
         # over whatever the user (didn't) type.
         resolved_email = resp.get("Email") or email or ""
+        if not resolved_email or "@" not in resolved_email:
+            self._signals.result.emit(False, "Google did not return a verified account identity.")
+            return
 
         # Now authenticate with gkeepapi
         try:
-            ok = self._keep_sync.login(resolved_email, master_token=master_token)
+            ok = self._keep_sync.login(resolved_email, master_token=master_token,
+                                       remember=self._remember_login, consent=True,
+                                       android_id=resp.get("AndroidId"), cancel_event=self._cancelled)
         except Exception:
             ok = False
+        if self._cancelled.is_set():
+            if ok:
+                self._keep_sync.logout()
+            return
         if ok:
             self._signals.result.emit(True, resolved_email or "(unknown)")
         else:
@@ -505,7 +564,11 @@ class LoginDialog(QDialog):
 
     @Slot(bool, str)
     def _on_login_result(self, success, message):
-        self._paste_btn.setEnabled(True)
+        self._login_started = False
+        self._captured_token = None
+        self._profile.cookieStore().deleteAllCookies()
+        if self._cancelled.is_set():
+            return
         if success:
             self.signed_in = True
             self._email = message
@@ -535,7 +598,7 @@ class LoginDialog(QDialog):
         QTimer.singleShot(100, self._browser.setFocus)
 
     def get_email(self):
-        return getattr(self, "_email", self._manual_email.text().strip())
+        return getattr(self, "_email", "")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1124,7 +1187,8 @@ class AppController(QObject):
 
         # Auto-login if we have a stored token
         email = self.config.get("email", "")
-        if email:
+        if (email and self.config.get("remember_google_account", False)
+                and self.config.get("experimental_auth_consent") == AUTH_CONSENT_VERSION):
             self._do_login(email)
 
         # First launch → login dialog; otherwise open notes
@@ -1265,6 +1329,7 @@ class AppController(QObject):
         self._writes_action.blockSignals(True)
         self._writes_action.setChecked(False)
         self._writes_action.blockSignals(False)
+        self._update_login_action_text()
         QMessageBox.warning(None, "KeepDesktop — sync paused", message)
 
     @Slot(str)
@@ -1968,6 +2033,7 @@ class AppController(QObject):
         self._writes_action.blockSignals(False)
 
         self.config["sync_enabled"] = False
+        self.config["remember_google_account"] = False
         self.config.pop("email", None)
         save_config(self.config)
 
@@ -1993,14 +2059,23 @@ class AppController(QObject):
     # ── Sync ───────────────────────────────────────────────────────────
 
     def _do_login(self, email, password=None, master_token=None):
+        if (self.config.get("remember_google_account") is not True
+                or type(self.config.get("experimental_auth_consent")) is not int
+                or self.config["experimental_auth_consent"] != AUTH_CONSENT_VERSION):
+            return
         try:
-            ok = self.sync.login(email, password=password, master_token=master_token)
+            ok = self.sync.login(email, password=password, master_token=master_token,
+                                 remember=True, consent=True)
         except Exception:
             ok = False
             self._sync_notice.emit("Stored credentials could not be unlocked. Please sign in again.")
         if ok:
             self.config["email"] = email
             self.config["notes_account"] = email
+            self.config["cloud_writes_enabled"] = False
+            self._writes_action.blockSignals(True)
+            self._writes_action.setChecked(False)
+            self._writes_action.blockSignals(False)
             self.config["sync_enabled"] = True
             save_config(self.config)
             self._full_sync()
@@ -2018,11 +2093,19 @@ class AppController(QObject):
     def _first_launch_login(self):
         dlg = LoginDialog(first_launch=True)
         dlg.set_keep_sync(self.sync)
-        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.signed_in:
-            email = dlg.get_email()
+        accepted = dlg.exec() == QDialog.DialogCode.Accepted and dlg.signed_in
+        email, remember = dlg.get_email(), dlg._remember_login
+        dlg.deleteLater()
+        if accepted:
             if email:
                 self.config["email"] = email
                 self.config["notes_account"] = email
+            self.config["remember_google_account"] = remember
+            self.config["experimental_auth_consent"] = AUTH_CONSENT_VERSION
+            self.config["cloud_writes_enabled"] = False
+            self._writes_action.blockSignals(True)
+            self._writes_action.setChecked(False)
+            self._writes_action.blockSignals(False)
             self.config["sync_enabled"] = True
             save_config(self.config)
             self._full_sync()
@@ -2043,11 +2126,19 @@ class AppController(QObject):
     def _show_login(self):
         dlg = LoginDialog(first_launch=False)
         dlg.set_keep_sync(self.sync)
-        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.signed_in:
-            email = dlg.get_email()
+        accepted = dlg.exec() == QDialog.DialogCode.Accepted and dlg.signed_in
+        email, remember = dlg.get_email(), dlg._remember_login
+        dlg.deleteLater()
+        if accepted:
             if email:
                 self.config["email"] = email
                 self.config["notes_account"] = email
+            self.config["remember_google_account"] = remember
+            self.config["experimental_auth_consent"] = AUTH_CONSENT_VERSION
+            self.config["cloud_writes_enabled"] = False
+            self._writes_action.blockSignals(True)
+            self._writes_action.setChecked(False)
+            self._writes_action.blockSignals(False)
             self.config["sync_enabled"] = True
             save_config(self.config)
             self._full_sync()

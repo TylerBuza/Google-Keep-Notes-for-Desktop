@@ -22,7 +22,7 @@ from typing import Any, Optional
 
 import requests
 
-from .auth import Credentials
+from .auth import Credentials, AuthError
 from .models import Note
 from .nested_model import (
     CheckboxItem,
@@ -55,7 +55,9 @@ CLIENT_VERSION = {"major": "3", "minor": "3", "build": "0", "revision": "387"}
 
 
 class KeepError(RuntimeError):
-    pass
+    def __init__(self, message, *, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 log = logging.getLogger(__name__)
@@ -100,11 +102,18 @@ class KeepClient:
     # -------------------------------------------------------------- internal
 
     def _get_bearer(self) -> str:
+        deadline = getattr(self.creds, "expires_at", None)
+        if isinstance(deadline, (int, float)) and time.monotonic() >= deadline:
+            # Check even when a bearer is already cached. A refresh must never
+            # silently extend a session-only login past its original lifetime.
+            self.creds.mint_bearer()
         # Re-mint a few minutes before expiry to be safe.
         if not self._bearer or time.monotonic() >= self._bearer_exp - 60:
             self._bearer = self.creds.mint_bearer()
             # gpsoauth doesn't tell us the TTL; Keep bearers are typically 1h.
             self._bearer_exp = time.monotonic() + 50 * 60
+            if isinstance(deadline, (int, float)):
+                self._bearer_exp = min(self._bearer_exp, deadline)
         return self._bearer
 
     def _post(self, url: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -134,7 +143,8 @@ class KeepClient:
                 resp = requests.post(url, headers=headers, json=body, timeout=(10, 30),
                                      allow_redirects=False)
             if resp.status_code != 200:
-                raise KeepError(f"Keep request rejected (HTTP {resp.status_code}); sync paused.")
+                raise KeepError(f"Keep request rejected (HTTP {resp.status_code}); sync paused.",
+                                status=resp.status_code)
             data = resp.json()
         except (requests.RequestException, ValueError):
             raise KeepError("Keep request failed or returned invalid JSON; result may be uncertain.") from None
@@ -252,6 +262,8 @@ class KeepClient:
              self._client_revision) = saved
             if isinstance(exc, KeepError):
                 raise
+            if isinstance(exc, AuthError):
+                raise KeepError("Google authentication is no longer valid; sign in again.", status=401) from None
             raise KeepError("Keep sync data could not be validated; cache unchanged.") from None
 
     def _sync_pages(self, full: bool = False) -> dict[str, Any]:

@@ -28,13 +28,14 @@ import threading
 from typing import Optional
 import secrets
 
-import gpsoauth
 
-from config import KEEP_COLORS, load_token, save_token
-from keep_sync import KeepNote   # reuse the dataclass
+from config import KEEP_COLORS, load_token_record, save_token, clear_token
+from note_model import KeepNote
 from keep_protocol.auth import (
-    Credentials, AuthError, load_credentials,
+    Credentials, SessionCredentials, AuthError, SESSION_SECONDS,
 )
+from keep_protocol.auth_transport import exchange_web_token
+import time
 from keep_protocol.client import KeepClient, KeepError
 from keep_protocol.models import Note as ServerNote
 from keep_protocol.nested_model import (
@@ -160,7 +161,8 @@ class KeepSyncV2:
     # ----- auth ---------------------------------------------------------
 
     def login(self, email: str, master_token: Optional[str] = None,
-              password: Optional[str] = None) -> bool:
+              password: Optional[str] = None, *, remember=False, consent=False,
+              android_id=None, cancel_event=None) -> bool:
         """Authenticate. Same signature as v1.
 
         - master_token: verify it, then store with per-user Windows DPAPI.
@@ -168,48 +170,57 @@ class KeepSyncV2:
         - neither: try loading from keyring, then v1's stored token.
         """
         self._authenticated = False
+        if consent is not True or (cancel_event and cancel_event.is_set()):
+            return False
+        remember = remember is True
         if password and not master_token:
             log.error("v2 sync does not support password login")
             return False
 
         if not master_token:
-            master_token = load_token(email)
-            if not master_token:
-                # Try keyring (in case the user previously logged in via
-                # keep_protocol's own CLI).
-                try:
-                    creds = load_credentials(email)
-                    master_token = creds.master_token
-                except AuthError:
-                    return False
+            if not remember:
+                return False
+            stored = load_token_record(email)
+            if stored:
+                master_token = stored["token"]
+                android_id = android_id or stored.get("android_id")
 
         if not master_token:
             return False
 
-        android_id = secrets.token_hex(8)
+        android_id = android_id or secrets.token_hex(8)
 
         # Build a Credentials and verify by minting a bearer.
         creds = Credentials(email=email, master_token=master_token,
                             android_id=android_id)
         try:
-            creds.mint_bearer()
+            bearer = creds.mint_bearer()
         except AuthError as exc:
             log.error("v2 bearer mint failed: %s", exc)
             self._authenticated = False
             return False
 
-        # Persist only verified credentials, protected with per-user DPAPI.
-        # Storage failure aborts login; there is no plaintext fallback.
+        if cancel_event and cancel_event.is_set():
+            return False
         try:
-            save_token(master_token, email)
+            if remember:
+                save_token(master_token, email, android_id=android_id)
+            else:
+                # Opting out also removes credentials retained by older builds.
+                clear_token(email)
+                creds = SessionCredentials(email, bearer, time.monotonic() + SESSION_SECONDS)
         except Exception:
             log.error("Secure credential storage failed; login aborted")
+            return False
+
+        if cancel_event and cancel_event.is_set():
+            clear_token(email)
             return False
 
         self._client = KeepClient(creds)
         self._email = email
         self._authenticated = True
-        log.info("v2 authenticated as %s", email)
+        log.info("v2 authentication succeeded")
         return True
 
     @staticmethod
@@ -219,7 +230,7 @@ class KeepSyncV2:
         or None on failure."""
         android_id = secrets.token_hex(8)
         try:
-            resp = gpsoauth.exchange_token(email, oauth_token, android_id)
+            resp = exchange_web_token(email, oauth_token, android_id)
             if not resp.get("Token"):
                 log.error("Google rejected the token exchange")
                 return None

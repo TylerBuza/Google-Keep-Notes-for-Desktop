@@ -9,7 +9,7 @@ on:
       version:
         description: 'Private installer version (for example 2.2.0-private.1)'
         required: true
-        default: '2.2.0-private.1'
+        default: '2.2.0-private.2'
 
 permissions:
   contents: write   # required to create the GitHub Release
@@ -34,12 +34,20 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           python -m pip install --upgrade pip
-          pip install -r requirements.lock
-          pip install pyinstaller==6.22.3
+          pip install --require-hashes --only-binary=:all: -r requirements.lock
+          pip install pyinstaller==6.22.3 pip-audit==2.10.1
           # Sanity check: every release has been broken at least once
           # by a silent pip failure. Verify the critical imports BEFORE
           # the build steps run.
-          python -c "import PySide6, gkeepapi, gpsoauth, keyring, requests; print('deps ok')"
+          python -c "import PySide6, keyring, requests; print('deps ok')"
+
+      - name: Audit installed Python build environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory -Path Output -Force | Out-Null
+          python -m pip_audit --local --format json --output Output/security-build-audit.json
 
       - name: Run test suite
         shell: pwsh
@@ -96,6 +104,13 @@ jobs:
         shell: pwsh
         run: pyinstaller --noconfirm KeepDesktop.spec
 
+      - name: Verify frozen authentication modules
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          python tools/verify_frozen_security.py build/KeepDesktop/Analysis-00.toc | Tee-Object -FilePath Output/security-frozen-inventory.json
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
@@ -127,6 +142,8 @@ jobs:
           path: |
             Output\KeepDesktop-Setup-*.exe
             Output\KeepDesktop-Setup-*.exe.sha256
+            Output\security-build-audit.json
+            Output\security-frozen-inventory.json
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')

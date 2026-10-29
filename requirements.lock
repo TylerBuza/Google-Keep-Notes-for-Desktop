@@ -1,29 +1,30 @@
-# Tested Windows environment, Python 3.13. Includes the test runner.
-# Review dependency updates deliberately; do not regenerate from global Python.
-certifi==2026.10.23
-charset-normalizer==3.5.2
-colorama==0.4.6
-future==1.0.0
-gkeepapi==0.17.1
-gpsoauth==2.0.0
-idna==3.20
-iniconfig==2.3.1
-jaraco.classes==3.4.0
-jaraco.context==6.1.2
-jaraco.functools==4.6.0
-keyring==25.7.0
-more-itertools==11.2.1
-packaging==26.3
-pluggy==1.7.0
-pycryptodomex==3.24.1
-Pygments==2.21.0
-PySide6==6.12.0
-PySide6_Addons==6.12.0
-PySide6_Essentials==6.12.0
-PySide6_Pdf==6.12.0.140
-PySide6_WebEngine==6.12.0.140
-pytest==9.2.0
-pywin32-ctypes==0.2.3
-requests==2.34.2
-shiboken6==6.12.0
-urllib3==2.8.0
+# Reviewed Windows x64 / CPython 3.13 build-and-test environment.
+# Hashes identify exact wheels, not proof that their source is vulnerability-free.
+# Legacy gkeepapi/gpsoauth are test-only and explicitly excluded from the installer.
+certifi==2026.10.23 --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
+charset-normalizer==3.5.2 --hash=sha256:78456a747de8dc58360ffa581f30a002baf5aa28cb262536545e91f113ed7639
+colorama==0.4.6 --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
+future==1.0.0 --hash=sha256:929292d34f5872e70396626ef385ec22355a1fae8ad29e1a734c3e43f9fbc216
+gkeepapi==0.17.1 --hash=sha256:8e242bc745640c809d21eb3f95c7182ac340a8cc2b84e5d78b9d692c2c2d35dc
+gpsoauth==2.0.0 --hash=sha256:fb8bf9cb8b6e6bee1dbedbbbe8958ace71cddaccf5950e79b38c4d2ae9870641
+idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+iniconfig==2.3.1 --hash=sha256:9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7
+jaraco.classes==3.4.0 --hash=sha256:f662826b6bed8cace05e7ff873ce0f9283b5c924470fe664fff1c2f00f581790
+jaraco.context==6.1.2 --hash=sha256:bf8150b79a2d5d91ae48629d8b427a8f7ba0e1097dd6202a9059f29a36379535
+jaraco.functools==4.6.0 --hash=sha256:99e3dc0060c5cbe8fcd1cdb36258e2a65ca40f1566b2033b12abb1bb44dd3c30
+keyring==25.7.0 --hash=sha256:be4a0b195f149690c166e850609a477c532ddbfbaed96a404d4e43f8d5e2689f
+more-itertools==11.2.1 --hash=sha256:35a7377edd1dd6608dcb2cdf534ded55ea32d49448875ad042cd3f879fb1ded0
+packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+pluggy==1.7.0 --hash=sha256:7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec
+pycryptodomex==3.24.1 --hash=sha256:82eb0dd8a95be97f03527b108ee49f9b86a7c534fa47fa7a510be3eab8ea9acd
+Pygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
+PySide6==6.12.0 --hash=sha256:31a8d2893f2f28ab483b1534dde0438f27af6e234593de30425cb4729052d8f8
+PySide6_Addons==6.12.0 --hash=sha256:98d8d62010da6605344cee83e5c96fb846170a1f2d924523f10f5d92078b02b0
+PySide6_Essentials==6.12.0 --hash=sha256:c9a95102aa23c1f86516a30d5a9be37552d324eee7e567eb7508973f1218cb42
+PySide6_Pdf==6.12.0.140 --hash=sha256:4971ba1a0ca15e7c29cfd808e9600aeb46b2305dad01456eb09fa3197166268e
+PySide6_WebEngine==6.12.0.140 --hash=sha256:f9b61b1d457a591ee590a6b80515f25a3e61e2576a2a0a70566380f9d9de4ab0
+pytest==9.2.0 --hash=sha256:07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588
+pywin32-ctypes==0.2.3 --hash=sha256:8a1513379d709975552d202d942d9837758905c8d01eb82b8bcc30918929e7b8
+requests==2.34.2 --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0
+shiboken6==6.12.0 --hash=sha256:a1906cb8116869178c64b6bab52623bbc8b4ceed7b30bfc3c9aa0f6e67f6438e
+urllib3==2.8.0 --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3

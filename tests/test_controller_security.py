@@ -13,12 +13,14 @@ from keep_sync import KeepNote
     ("evilgoogle.com", True, False), ("google.com.evil.test", True, False),
     ("accounts.google.com", False, False)])
 def test_login_cookie_must_be_secure_and_from_google(domain, secure, accepted):
+    import threading
     cookie = MagicMock()
     cookie.name.return_value = b"oauth_token"
-    cookie.value.return_value = b"dummy-token"
+    cookie.value.return_value = b"oauth2_4/dummy-token"
     cookie.domain.return_value = domain
     cookie.isSecure.return_value = secure
-    dialog = SimpleNamespace(_captured_token=None, _signals=MagicMock())
+    dialog = SimpleNamespace(_captured_token=None, _signals=MagicMock(),
+                             _login_started=True, _cancelled=threading.Event())
     LoginDialog._on_cookie(dialog, cookie)
     assert bool(dialog._signals.token_found.emit.called) is accepted
 

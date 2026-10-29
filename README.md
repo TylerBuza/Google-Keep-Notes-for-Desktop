@@ -11,7 +11,10 @@ upstream commit `60a70ffee9bed33fbc1aa373203a89a03df7dc3f` (v2.2.0).
 Original history, attribution and AGPL-3.0 license are retained. This is a
 private standalone repository because GitHub public forks cannot be private.
 
-- **Protected credentials and notes:** per-Windows-user DPAPI encryption,
+- **Session-only login by default:** after the initial exchange, retain only
+  a Keep-scoped bearer in memory for at most 45 minutes. Remembering the
+  powerful master token requires a separate explicit opt-in.
+- **Protected remembered credentials and notes:** per-Windows-user DPAPI encryption,
   atomic saves, migration of the old plaintext cache/token, and sign-out
   that clears both stored credentials and in-memory access. Login cookies
   use an off-the-record browser profile.
@@ -28,9 +31,13 @@ private standalone repository because GitHub public forks cannot be private.
   non-overlapping edits to the same note. No automatic local-wins merge.
 - **No automatic installer updates:** unsigned upstream binaries cannot
   silently replace this build. Dependency versions used for testing are
-  frozen in `requirements.lock`.
+  frozen with exact wheel SHA256 hashes in `requirements.lock`.
+- **Guarded experimental login:** visible HTTPS origin/path, strict navigation
+  and resource allowlists, rejected certificate errors, no popups/downloads,
+  no manual-cookie/CLI capture bypass, and no automatic import of old logins.
+  See [the login review](security/LOGIN-REVIEW.md) for tested checks and limits.
 
-Google's internal API is **still unofficial**. It cannot be made supported
+Google’s internal API is **still unofficial**. It cannot be made supported
 by a fork. See [SECURITY.md](SECURITY.md) for limits and recovery guidance.
 
 ## Download & Install
@@ -53,13 +60,25 @@ Run this copy from source using the commands below. Upstream installers do
 ## Connecting Google Keep
 
 1. Right-click the tray icon → **Sign in to Google Keep**
-2. A Google sign-in window opens — enter your Google account credentials and complete any 2-Step Verification prompts as normal.
-3. Once you're signed in, the window closes automatically and your Keep notes start appearing as floating windows.
+2. Read the experimental-login warning. Leave **Remember on this PC** unchecked
+   for session-only mode, acknowledge the risk, then click **Continue to Google**.
+3. Verify the displayed address starts with `https://accounts.google.com`.
+   Complete Google's password/2FA prompts yourself. If Google blocks the embedded
+   browser, stop—this app offers no security-warning bypass.
+4. On success, the window closes and notes sync into the manager. Cloud writes
+   are reset to OFF after each login; enable them separately only after a backup.
 
-Google handles the password/2FA page; the app retains a sensitive long-lived
-master token, encrypted with Windows DPAPI in `%APPDATA%\KeepDesktop\keep_token.dat`.
-Optional CLI login uses Windows Credential Manager. This is not a normal
-limited-scope public OAuth integration. Revoke this device/session from
+This is **not** a Google-approved public OAuth integration. The initial exchange
+still temporarily obtains a powerful master token. Session-only mode does not
+retain it as a credential: it keeps only the requested Keep-scoped bearer in
+memory for at most 45 minutes, then requires another sign-in. Python cannot
+guarantee forensic erasure of transient strings from process memory.
+
+Only if you explicitly choose **Remember** is the master token saved with
+Windows DPAPI in `%APPDATA%\KeepDesktop\keep_token.dat` and reused on later starts.
+Session-only sign-in removes older remembered credentials for that account.
+Legacy credential-manager copies are cleaned up on opt-out/sign-out. CLI cookie
+capture and bearer-printing commands are disabled. Revoke the device/session from
 [Google Account → Security → Your devices](https://myaccount.google.com/device-activity)
 if needed. Signing out locally does not revoke Google's server-side token.
 
@@ -97,8 +116,12 @@ python -m venv .venv
 Requires [Inno Setup 6](https://jrsoftware.org/isdl.php) on your `PATH`.
 
 ```powershell
-pip install -r requirements.lock pyinstaller
-pyinstaller KeepDesktop.spec
+.\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+.\.venv\Scripts\python.exe -m pip install pyinstaller==6.22.3 pip-audit==2.10.1
+.\.venv\Scripts\python.exe -m PyInstaller KeepDesktop.spec
+mkdir Output -ErrorAction SilentlyContinue
+.\.venv\Scripts\python.exe -m pip_audit --local --format json --output Output/security-build-audit.json
+.\.venv\Scripts\python.exe tools/verify_frozen_security.py build/KeepDesktop/Analysis-00.toc | Out-File Output/security-frozen-inventory.json -Encoding utf8
 ISCC.exe installer.iss
 ```
 
@@ -112,7 +135,9 @@ GitHub Actions does this automatically on every `v*` tag — see `.github/workfl
 - Sync talks directly to Google Keep's internal
   `notes-pa.clients6.google.com/notes/v1/changes` endpoint via
   `keep_protocol/`
-- Auth uses [`gpsoauth`](https://github.com/simon-weber/gpsoauth) — your password is never stored, only the master token locally
+- Auth uses a small endpoint-locked transport derived from the documented
+  gpsoauth protocol. The legacy gpsoauth/gkeepapi code remains for historical
+  tests only and is explicitly excluded from the packaged desktop app.
 - Offline edits, dirty flags and their confirmed sync baselines survive restarts
 - Local notes sync only after cloud writes are explicitly enabled
 - Changing an existing note between text/checklist is deliberately blocked;

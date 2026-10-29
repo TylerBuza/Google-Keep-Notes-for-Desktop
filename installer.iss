@@ -60,6 +60,10 @@ Source: "dist\KeepDesktop\*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 Source: "LICENSE";            DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md";          DestDir: "{app}"; Flags: ignoreversion
 Source: "SECURITY.md";        DestDir: "{app}"; Flags: ignoreversion
+Source: "security\LOGIN-REVIEW.md"; DestDir: "{app}\security"; Flags: ignoreversion
+Source: "security\dependency-audit.json"; DestDir: "{app}\security"; Flags: ignoreversion
+Source: "Output\security-build-audit.json"; DestDir: "{app}\security"; Flags: ignoreversion
+Source: "Output\security-frozen-inventory.json"; DestDir: "{app}\security"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}";              Filename: "{app}\{#MyAppExeName}"

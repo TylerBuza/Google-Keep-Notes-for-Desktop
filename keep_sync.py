@@ -2,11 +2,11 @@
 
 import logging
 import threading
-from dataclasses import dataclass, field
 from uuid import getnode as get_mac
 
 import gkeepapi
 import gpsoauth
+from note_model import KeepNote
 
 from config import (
     KEEP_COLORS, load_token, save_token,
@@ -16,31 +16,6 @@ log = logging.getLogger(__name__)
 
 # Reverse lookup: hex -> Keep color enum name
 HEX_TO_KEEP_COLOR = {v: k for k, v in KEEP_COLORS.items()}
-
-
-@dataclass
-class KeepNote:
-    """Lightweight mirror of a Google Keep note."""
-    id: str
-    title: str = ""
-    text: str = ""
-    html: str = ""
-    color_hex: str = "#FFF475"
-    pinned: bool = False
-    trashed: bool = False
-    labels: list = field(default_factory=list)
-    sort_key: int = 0
-    is_list: bool = False
-    list_items: list = field(default_factory=list)  # [{text, checked}]
-    # User-imposed order in the manager / desktop. 0 = unset, fall back
-    # to ``sort_key`` from Keep. When the user reorders notes locally we
-    # set this to a sequential value so it persists across syncs.
-    local_order: int = 0
-    # Whether the user picked a dark variant from our extended palette.
-    # Wire-color (color_hex) is always the matching LIGHT colour Keep
-    # knows about; dark_mode is local-only and is reset to False whenever
-    # the colour changes server-side.
-    dark_mode: bool = False
 
 
 def _color_to_hex(keep_color) -> str:

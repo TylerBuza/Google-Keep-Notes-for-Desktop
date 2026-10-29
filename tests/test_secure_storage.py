@@ -130,7 +130,7 @@ def test_credentials_repr_never_includes_token():
 
 def test_google_auth_error_never_echoes_response(monkeypatch):
     import keep_protocol.auth as auth
-    monkeypatch.setattr(auth.gpsoauth, "perform_oauth", lambda *args: {"Token": "dummy-secret"})
+    monkeypatch.setattr("keep_protocol.auth_transport._post", lambda form: {"Token": "dummy-secret"})
     with pytest.raises(auth.AuthError) as result:
         Credentials("test@example.test", "dummy-secret", "id").mint_bearer()
     assert "dummy-secret" not in str(result.value)

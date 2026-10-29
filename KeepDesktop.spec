@@ -20,7 +20,7 @@ project_root = Path(SPECPATH).resolve()
 # Packages that call importlib.metadata.version(__name__) at import time.
 # Their .dist-info folders must be bundled or the import will crash.
 _metadata = []
-for pkg in ("gpsoauth", "gkeepapi", "requests", "urllib3"):
+for pkg in ("requests", "urllib3"):
     try:
         _metadata += copy_metadata(pkg)
     except Exception:
@@ -35,8 +35,6 @@ a = Analysis(
         'PySide6.QtWebEngineCore',
         'PySide6.QtWebEngineWidgets',
         'PySide6.QtNetwork',
-        'gkeepapi',
-        'gpsoauth',
         'keyring.backends.Windows',
     ],
     hookspath=[],
@@ -47,6 +45,11 @@ a = Analysis(
         'unittest',
         'test',
         'pydoc',
+        # Historical test-only modules must not become alternative login paths.
+        'keep_sync',
+        'gkeepapi',
+        'gpsoauth',
+        'Cryptodome',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

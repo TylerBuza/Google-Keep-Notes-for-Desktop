@@ -250,3 +250,14 @@ def test_dirty_pull_does_not_advance_conflict_baseline(sync, monkeypatch):
     monkeypatch.setattr("keep_sync_v2.KeepSyncV2.fetch_notes", lambda *args: [local("phone")])
     sync.fetch_notes(hold_baseline_for={"1.test"})
     assert sync.baselines["1.test"]["text"] == "base"
+
+
+def test_google_rejecting_keep_scope_signs_out_instead_of_claiming_verified_sync(sync, monkeypatch):
+    sync._client.sync.side_effect = KeepError("Google rejected session", status=403)
+    monkeypatch.setattr("config.clear_token", MagicMock())
+    with pytest.raises(KeepError):
+        sync.fetch_notes()
+    assert not sync.is_authenticated
+    assert not sync.writes_enabled
+    assert sync._client is None
+    sync.on_notice.assert_called_once()

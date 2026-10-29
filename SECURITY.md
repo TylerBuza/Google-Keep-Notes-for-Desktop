@@ -3,12 +3,33 @@
 ## What this copy changes
 
 The desktop entry point uses `HardenedKeepSync`, never the legacy gkeepapi
-writer. Tokens and the local notes cache use current-user Windows DPAPI
-(not machine-wide protection). Secure-storage failure is an error; there is
-no plaintext fallback. Optional CLI credentials explicitly use Windows
-Credential Manager, not arbitrary keyring backends. Token responses are
-not included in logs or exception messages, and credentials have redacted
-representations. Browser login uses a non-persistent context.
+writer. Remembered master tokens and the local notes cache use current-user
+Windows DPAPI (not machine-wide protection). Secure-storage failure is an error;
+there is no plaintext fallback. Default sign-in instead retains only a Keep
+bearer in memory for at most 45 minutes. Retaining the master token requires a
+separate explicit confirmation. Old credentials cannot auto-login without the
+new consent version and explicit remember preference. Credential-manager access
+is limited to Windows' native backend for legacy cleanup. Token responses are
+not included in logs or exception messages; credentials have redacted reprs.
+
+The experimental login window does not load Google's page until consent. It
+displays the HTTPS origin and path (not secret query/fragment values), permits
+top-level navigation only to `accounts.google.com`, and restricts resource requests to
+an explicit set of Google authentication/static-resource hosts. The only
+cross-origin frames allowed are Google's specific `/recaptcha/` challenges. Popups,
+downloads, clipboard access from JavaScript and device permissions are denied.
+Certificate failures are rejected with no override. The profile is off-record,
+with memory-only cookies/cache/permissions; cancellation discards the page and
+clears cookies. Manual-cookie paste and command-line token capture are removed.
+The network interceptor remains active until page destruction, then detaches
+before profile deletion to prevent Qt/Python shutdown deadlocks.
+
+The auth transport only POSTs to `https://android.clients.google.com/auth`, with
+TLS >=1.2, certificate and hostname validation, a pinned CA-bundle dependency,
+no redirects/retries/environment proxies/netrc, bounded timeouts/response size,
+and fixed error messages. Only Keep's memento scope is requested for the bearer;
+the unused reminders scope is no longer requested. This is not a read-only
+OAuth scope: cloud-write restrictions remain an application policy.
 
 Cloud writes start disabled. Before writing an existing note, the app pulls
 authoritative state and compares it against a persisted baseline. Concurrent
@@ -29,8 +50,11 @@ Incoming cloud changes also get a recovery copy before replacing local
 content, including old caches with no reliable dirty flag from upstream.
 
 The private build never checks for or installs upstream executable updates.
-Dependency versions are frozen, not cryptographically audited. Keep the Qt/
-Chromium runtime updated through deliberate, tested dependency upgrades.
+Application/test dependencies are pinned to exact Windows x64 / CPython 3.13
+wheel hashes, verified by pip. CI audits the installed Python build environment
+with pip-audit and verifies that the frozen module inventory excludes legacy
+gkeepapi/gpsoauth login paths. Hashes/CVE scans are not a full source-code audit.
+Keep Qt/Chromium updated through deliberate, tested dependency upgrades.
 
 ## What it cannot guarantee
 
@@ -42,6 +66,16 @@ Chromium runtime updated through deliberate, tested dependency upgrades.
 - A Google master token is sensitive and potentially more powerful than a
   Keep-only token. Local sign-out does not revoke it on Google's servers.
   Revoke the associated device/session in Google Account Security if exposed.
+- The user explicitly chose to retain experimental native sync rather than
+  remove this credential flow. That accepts the remaining master-token risk;
+  it does not eliminate it. Transient strings cannot be guaranteed erased
+  from Python memory. Remember mode deliberately retains the encrypted token.
+- Google prohibits developer-controlled embedded user-agents for supported
+  OAuth authorization. This experimental Android flow is not Google-approved
+  and may be blocked. The app must not spoof its way around Google's blocks.
+- Advisory scans do not prove that every dependency, native Qt/Chromium
+  component, compiler or OS service is vulnerability-free. No independent
+  line-by-line audit or external penetration test is claimed.
 - DPAPI protects files at rest, not against malware running as you, an
   administrator, a compromised OS, or a compromised Python dependency. It
   is not a separate-password vault. Your Windows account is the boundary.
@@ -59,14 +93,18 @@ Chromium runtime updated through deliberate, tested dependency upgrades.
 - Recovery snapshots are retained locally without automatic pruning. The
   viewer shows the most recent 200; older encrypted files remain under
   `%APPDATA%\KeepDesktop\recovery`. Treat them as sensitive note history.
-- No live Google account or production-note writes are exercised by tests.
+- Automated tests never enter Google credentials or write production notes.
+  An isolated anonymous probe verifies the real Google HTTPS page and clean
+  browser/profile shutdown; it is NOT an authenticated-account test. A real
+  end-to-end login requires the user to complete Google's prompts manually.
   Test with a secondary account before trusting important notes.
 
 ## Safe first run and recovery
 
 1. Export Keep with Google Takeout. Use a secondary account initially.
 2. Run from this repository, not an upstream installer. Sign in and verify
-   read-only synchronization before enabling cloud writes in the tray.
+   read-only synchronization before enabling cloud writes in the tray. Leave
+   Remember unchecked unless you explicitly accept retaining a master token.
 3. For conflicts, open **View saved recovery copies** to view/copy both
    versions, then **Resolve sync conflicts** to explicitly choose. A removed
    or archived original is not automatically resurrected; copy recovered

@@ -15,8 +15,8 @@ from pathlib import Path
 import threading
 import uuid
 
-from config import DATA_DIR, load_config, save_config
-from keep_sync import KeepNote
+from config import DATA_DIR, load_config, save_config, save_json
+from note_model import KeepNote
 from keep_sync_v2 import KeepSyncV2, _wire_color_to_hex, html_to_styled_doc
 from keep_protocol.client import KeepError
 from keep_protocol.nested_model import (
@@ -24,6 +24,7 @@ from keep_protocol.nested_model import (
     StyledDoc, Paragraph, StyleRun,
 )
 from secure_storage import save_protected, load_protected
+from keep_protocol.auth import AUTH_CONSENT_VERSION, SessionCredentials
 
 
 def snapshot(note: KeepNote) -> dict:
@@ -79,7 +80,8 @@ class HardenedKeepSync(KeepSyncV2):
         self._recovery_paths = {}
         self._create_pending = None
 
-    def login(self, email, master_token=None, password=None):
+    def login(self, email, master_token=None, password=None, *, remember=False,
+              consent=False, android_id=None, cancel_event=None):
         with self._lock:
             cfg = load_config()
             owner = cfg.get("notes_account")
@@ -89,10 +91,32 @@ class HardenedKeepSync(KeepSyncV2):
                                "Sign out and choose Clear live local notes before switching accounts. "
                                "Saved recovery copies are retained.")
                 return False
-            ok = super().login(email, master_token=master_token, password=password)
+            ok = super().login(email, master_token=master_token, password=password,
+                               remember=remember, consent=consent, android_id=android_id,
+                               cancel_event=cancel_event)
             if ok:
+                self.writes_enabled = False
                 cfg["notes_account"] = email
-                save_config(cfg)
+                cfg["remember_google_account"] = remember
+                cfg["experimental_auth_consent"] = AUTH_CONSENT_VERSION
+                cfg["cloud_writes_enabled"] = False
+                self._login_validation = {
+                    "at": datetime.now(timezone.utc).isoformat(), "bearer_issued": True,
+                    "keep_api_verified": False, "requested_scope": "https://www.googleapis.com/auth/memento",
+                    "retention": "encrypted-master" if remember else "memory-only-keep-bearer",
+                    "cloud_writes_enabled": False,
+                }
+                try:
+                    save_config(cfg)
+                    save_json(Path(DATA_DIR) / "auth-validation.json", self._login_validation)
+                except Exception:
+                    try:
+                        self.logout()
+                    except Exception:
+                        pass  # logout disables memory access before clearing stores.
+                    self.on_notice("Could not save secure login state. The app is signed out. "
+                                   "If credential cleanup was blocked, revoke the device in Google Security.")
+                    return False
             return ok
 
     def set_writes_enabled(self, enabled):
@@ -225,7 +249,31 @@ class HardenedKeepSync(KeepSyncV2):
     def fetch_notes(self, force_resync=False, hold_baseline_for=None):
         hold = hold_baseline_for or set()
         with self._lock:
-            notes = super().fetch_notes(force_resync, hold)
+            if self._client and isinstance(getattr(self._client, "creds", None), SessionCredentials):
+                try:
+                    self._client.creds.mint_bearer()
+                except Exception:
+                    self._authenticated = False
+                    self._client = None
+                    self.writes_enabled = False
+                    self.on_notice("Your session-only Google Keep login expired. Sign in again. "
+                                   "Your local notes are retained.")
+                    raise KeepError("Session-only Google login expired.") from None
+            try:
+                notes = super().fetch_notes(force_resync, hold)
+            except KeepError as error:
+                if error.status in (401, 403):
+                    try:
+                        self.logout()
+                    except Exception:
+                        pass  # Memory access is disabled even if a store is locked.
+                    self.on_notice("Google rejected this Keep session. The app is signed out and "
+                                   "cloud writes are off. Do not bypass any Google security warning.")
+                raise
+            validation = getattr(self, "_login_validation", None)
+            if validation and not validation["keep_api_verified"]:
+                validation["keep_api_verified"] = True
+                save_json(Path(DATA_DIR) / "auth-validation.json", validation)
             for note in notes:
                 if note.id not in hold:
                     self.baselines[note.id] = snapshot(note)

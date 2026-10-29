@@ -110,9 +110,10 @@ def load_config():
         "always_on_top": False,
         "opacity": 0.95,
         "cloud_writes_enabled": False,
-        # Use the new keep_protocol-based sync (decodes/encodes Keep's
-        # docs-nestedModel formatting state). Falls back to gkeepapi
-        # when False. Default ON for new installs from 1.1.0 onward.
+        "remember_google_account": False,
+        "experimental_auth_consent": 0,
+        # Legacy preference is tolerated for old configs, but the desktop
+        # always uses the hardened v2 path and never falls back to gkeepapi.
         "keep_protocol_v2": True,
         # Global text-size multiplier applied across every note window
         # (body, headings, toolbar, checklist). 1.0 = 100%.
@@ -256,9 +257,12 @@ def set_autostart(enabled: bool) -> bool:
     return os.path.isfile(STARTUP_SHORTCUT)
 
 
-def save_token(token, email=""):
+def save_token(token, email="", android_id=None):
     from secure_storage import save_protected
-    save_protected(TOKEN_FILE, {"token": token, "email": email})
+    record = {"token": token, "email": email}
+    if android_id:
+        record["android_id"] = android_id
+    save_protected(TOKEN_FILE, record)
 
 
 def load_token(email=None):
@@ -281,6 +285,15 @@ def load_token(email=None):
     if token:
         save_token(token, email)
     return token or None
+
+
+def load_token_record(email):
+    from secure_storage import load_protected
+    token = load_token(email)
+    if not token:
+        return None
+    record = load_protected(TOKEN_FILE)
+    return {"token": token, "android_id": record.get("android_id")}
 
 
 def clear_token(email=None):
