@@ -1,9 +1,25 @@
 # Releases and verification
 
-## For users
+## Security notice for 2.3.0
 
-The 2.3.0 setup is published with unresolved antivirus findings disclosed in its
-release notes and attached summaries. No clean-binary claim is made.
+**The published 2.3.0 binaries have unresolved antivirus detections. These have
+not been established to be false positives; no clean-binary claim is made.**
+
+Analyses completed on 2026-10-29. Exact-file summaries are attached to the
+[release](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases/tag/v2.3.0).
+
+| Binary | Detections | Other engine results |
+| --- | --- | --- |
+| Setup EXE | DeepInstinct: `MALICIOUS` | 65 undetected, 3 timeouts, 6 unsupported |
+| Packaged app EXE | Skyhigh: `BehavesLike.Win64.Backdoor.rc`; Cylance: `Unsafe` | 69 undetected, 4 unsupported |
+
+Installer SHA256: `16cd28cadec94ef1bb243e1544ef73a2af871d997b58c3d5c8dce57eefbaa915`.
+Application SHA256: `c7295c862d636a2e2685879d99771214c3c6360d14b756ffc11421e6ba873af9`.
+
+“Undetected” is not a safety certification; timeouts and unsupported files are
+not passes. Do not disable antivirus or dismiss a warning to run this release.
+
+## For users
 
 Download only from this project's
 [GitHub releases](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases).
