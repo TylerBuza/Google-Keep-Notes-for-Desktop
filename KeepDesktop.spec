@@ -30,7 +30,7 @@ a = Analysis(
     ['main.py'],
     pathex=[str(project_root)],
     binaries=[],
-    datas=_metadata,
+    datas=_metadata + [(str(project_root / 'assets' / 'fonts'), 'assets/fonts')],
     hiddenimports=[
         'PySide6.QtWebEngineCore',
         'PySide6.QtWebEngineWidgets',

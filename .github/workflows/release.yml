@@ -9,7 +9,7 @@ on:
       version:
         description: 'Private installer version (for example 2.2.0-private.1)'
         required: true
-        default: '2.2.0-private.9'
+        default: '2.2.0-private.10'
 
 permissions:
   contents: write   # required to create the GitHub Release
@@ -111,6 +111,13 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           python tools/verify_frozen_security.py build/KeepDesktop/Analysis-00.toc | Tee-Object -FilePath Output/security-frozen-inventory.json
 
+      - name: Verify bundled font assets and licenses
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          python tools/verify_frozen_fonts.py dist/KeepDesktop | Tee-Object -FilePath Output/security-fonts.json
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
@@ -144,6 +151,7 @@ jobs:
             Output\KeepDesktop-Setup-*.exe.sha256
             Output\security-build-audit.json
             Output\security-frozen-inventory.json
+            Output\security-fonts.json
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')

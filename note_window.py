@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from keep_protocol.nested_model import u16_len
 from native_resources import LocalNoteDocument
-from ui_typography import crisp_font
+from ui_typography import BODY_FAMILY, crisp_font
 from content_sizing import body_height, chrome_height
 from config import (
     KEEP_COLORS, KEEP_COLORS_DARK, DEFAULT_WIDTH, DEFAULT_HEIGHT,
@@ -318,7 +318,7 @@ class FormattingToolbar(QWidget):
 
     def _make_btn(self, label, weight=None, italic=False, underline=False, strikeout=False):
         btn = QPushButton(label)
-        f = crisp_font(QFont("Segoe UI", round(_scaled_pt(BASE_TOOLBAR_BTN_PT))))
+        f = crisp_font(QFont(BODY_FAMILY, round(_scaled_pt(BASE_TOOLBAR_BTN_PT))))
         if weight:
             f.setWeight(weight)
         f.setItalic(italic)
@@ -351,7 +351,7 @@ class FormattingToolbar(QWidget):
             (self.strike_btn, {"strikeout": True}),
             (self.clear_fmt_btn, {}),
         ):
-            f = crisp_font(QFont("Segoe UI", pt))
+            f = crisp_font(QFont(BODY_FAMILY, pt))
             if kwargs.get("weight"):
                 f.setWeight(kwargs["weight"])
             f.setItalic(kwargs.get("italic", False))
@@ -663,11 +663,11 @@ class TitleBar(QWidget):
         # the tail of long titles.
         self.title_edit.setCursorPosition(0)
         self.title_edit.setFont(
-            crisp_font(QFont("Segoe UI", round(_scaled_pt(BASE_TITLE_PT)), QFont.Weight.Bold))
+            crisp_font(QFont("Google Sans", round(_scaled_pt(BASE_TITLE_PT)), QFont.Weight.Medium), title=True)
         )
         self.title_edit.setStyleSheet(
             "QLineEdit { color: #222; background: transparent; border: none;"
-            "            padding: 0px; font-weight: bold; }"
+            "            padding: 0px; font-weight: 500; }"
             "QLineEdit:focus { background: rgba(255,255,255,0.4);"
             "                  border-radius: 3px; }"
         )
@@ -729,7 +729,7 @@ class TitleBar(QWidget):
         """Re-apply the current global FONT_SCALE to the title font and
         the pin/colour/close button glyph size."""
         self.title_edit.setFont(
-            crisp_font(QFont("Segoe UI", round(_scaled_pt(BASE_TITLE_PT)), QFont.Weight.Bold))
+            crisp_font(QFont("Google Sans", round(_scaled_pt(BASE_TITLE_PT)), QFont.Weight.Medium), title=True)
         )
         self._restyle_widgets()
 
@@ -746,7 +746,7 @@ class TitleBar(QWidget):
             )
         self.title_edit.setStyleSheet(
             f"QLineEdit {{ color: {text_color}; background: transparent;"
-            f"             border: none; padding: 0px; font-weight: bold; }}"
+            f"             border: none; padding: 0px; font-weight: 500; }}"
             f"QLineEdit:focus {{ background: {focus_bg};"
             f"                   border-radius: 3px; color: {text_color}; }}"
         )
@@ -898,7 +898,7 @@ class NoteTextEdit(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDocument(LocalNoteDocument(self))
-        self.setFont(crisp_font(QFont("Segoe UI", round(_scaled_pt(BASE_BODY_PT)))))
+        self.setFont(crisp_font(QFont(BODY_FAMILY, round(_scaled_pt(BASE_BODY_PT)))))
         self.setAcceptRichText(True)
         # Qt's built-in HTML renderer applies font-weight:bold to <h1>
         # and <h2> by default. Keep web does NOT — headings there are
@@ -1016,7 +1016,39 @@ class NoteTextEdit(QTextEdit):
 
     def setHtml(self, html):  # type: ignore[override]
         super().setHtml(html)
+        self._use_interface_font()
         self._apply_tight_block_format()
+
+    def _use_interface_font(self):
+        """Display old app-generated HTML with the new local UI typeface.
+
+        Only legacy UI families are replaced, not text, sizes, headings or
+        emphasis. The model's original HTML is untouched until a real edit.
+        """
+        legacy = {"segoe ui", "segoe ui variable", "segoe ui variable text"}
+        ranges = []
+        block = self.document().begin()
+        while block.isValid():
+            iterator = block.begin()
+            while not iterator.atEnd():
+                fragment = iterator.fragment()
+                if fragment.isValid():
+                    families = fragment.charFormat().fontFamilies()
+                    if families and all(family.casefold() in legacy for family in families):
+                        ranges.append((fragment.position(), fragment.length()))
+                iterator += 1
+            block = block.next()
+        cursor = QTextCursor(self.document())
+        cursor.beginEditBlock()
+        try:
+            for position, length in ranges:
+                cursor.setPosition(position)
+                cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+                fmt = QTextCharFormat()
+                fmt.setFontFamilies([BODY_FAMILY])
+                cursor.mergeCharFormat(fmt)
+        finally:
+            cursor.endEditBlock()
 
     def set_styled_doc(self, doc):
         """Render a `keep_protocol.nested_model.StyledDoc` faithfully
@@ -1571,7 +1603,7 @@ class ChecklistRow(QFrame):
         self.line.setStyleSheet(
             "QLineEdit { background: transparent; border: none; padding: 2px; }"
         )
-        self.line.setFont(crisp_font(QFont("Segoe UI", round(_scaled_pt(BASE_CHECKLIST_PT)))))
+        self.line.setFont(crisp_font(QFont(BODY_FAMILY, round(_scaled_pt(BASE_CHECKLIST_PT)))))
         self.line.textEdited.connect(self._on_text_edited)
         self.line.enter_pressed.connect(self._on_enter)
         self.line.backspace_at_start.connect(self._on_backspace_at_start)
@@ -1744,7 +1776,7 @@ class ChecklistEditor(QScrollArea):
         """Re-apply the current global FONT_SCALE to every row's text."""
         pt = round(_scaled_pt(BASE_CHECKLIST_PT))
         for r in self._rows:
-            r.line.setFont(crisp_font(QFont("Segoe UI", pt)))
+            r.line.setFont(crisp_font(QFont(BODY_FAMILY, pt)))
 
     def focus_first_empty(self):
         for r in self._rows:
@@ -2385,7 +2417,7 @@ class NoteWindow(QWidget):
         self.title_bar.set_font_scale()
         self.fmt_toolbar.set_font_scale()
         self.checklist_editor.set_font_scale()
-        self.text_edit.setFont(crisp_font(QFont("Segoe UI", round(_scaled_pt(BASE_BODY_PT)))))
+        self.text_edit.setFont(crisp_font(QFont(BODY_FAMILY, round(_scaled_pt(BASE_BODY_PT)))))
         if not self._is_list:
             from keep_sync_v2 import html_to_styled_doc
             doc = html_to_styled_doc(self.text_edit.toHtml())

@@ -100,8 +100,11 @@ No existing local notes are deleted to make room for an import.
 ## Native dashboard
 
 The Keep-style dashboard is native Qt, not an authenticated website or a script
-bridge. Its control icons are locally drawn vectors and its font is installed
-locally. The header uses an unmodified official Google Keep PNG embedded in
+bridge. Its control icons are locally drawn vectors. Original OFL-licensed
+Google Sans/Roboto fonts are bundled, hashed and registered only for this process;
+there is no system-wide font install or runtime font download. CI verifies the
+frozen assets and included license/trademark notices. The header uses an
+unmodified official Google Keep PNG embedded in
 `keep_brand.py`, with its source URL and SHA256 recorded; it is not downloaded
 at runtime. Tray/taskbar branding remains the app's distinct K icon.
 Card titles, bodies, and labels use literal plain text; previews do not render
@@ -115,11 +118,15 @@ Existing desktop visibility and per-note floating themes are retained.
 
 Editors use the same local dark palette as cards, without rewriting wire colors.
 First-time desktop pop-outs default to that palette; existing local choices are
-not overwritten. Default text is larger, with grayscale font antialiasing/full
-hinting. Popup and desktop auto-height measure native document/checklist layout,
+not overwritten. Default text is larger, with smooth grayscale antialiasing and
+natural outlines rather than forced full pixel-grid hinting. Popup and desktop auto-height measure native document/checklist layout,
 cap at available space, and scroll long content. Manual vertical desktop resizing
 opts that window out of auto-height until the user re-enables it. These operations
 change display/geometry only, never mark note content dirty or fetch resources.
+Legacy app-generated Segoe UI HTML is rendered using the new body font locally;
+model HTML remains untouched until a real edit, and title-only editor saves do
+not reserialize the body. Font normalization preserves text, sizes, emphasis,
+headings and link restrictions. It changes no sync permission or wire typeface.
 
 Drafts commit on the user-requested close actions: outside/backdrop or logo
 clicks, Close, or Escape (and Save in a dashboard-exit prompt). Opening/reading

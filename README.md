@@ -93,8 +93,10 @@ by Google. Asset provenance is recorded in `keep_brand.py`.
   Desktop notes also auto-fit height without changing their width/placement.
   Manually dragging a top/bottom/corner resize handle keeps that height; turn
   **Fit height to content** back on from the desktop note's context menu.
-- Default card/editor/floating-note text is larger. Native fonts use grayscale
-  antialiasing and full hinting to reduce colored fringes on fractional-DPI screens.
+- Default card/editor/floating-note text is larger. Google Sans titles and Roboto
+  bodies/controls use smooth grayscale antialiasing without forced full pixel-grid
+  hinting. The original OFL-licensed fonts and notices are bundled locally, not
+  installed system-wide or downloaded at runtime. See `assets/fonts/README.md`.
 - More actions include reorder, delete (with confirmation), and type conversion
   for local notes only. Failed/blocked deletes leave the card present.
 

@@ -14,6 +14,7 @@ def main():
     parser.add_argument("--height", type=int, default=800)
     parser.add_argument("--editor", choices=("text", "checklist", "short", "long"))
     parser.add_argument("--two-way", action="store_true", help="Show fictional sync-on UI; never connects")
+    parser.add_argument("--card", action="store_true", help="Capture a fictional card to compare typography")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="keep-dashboard-") as data:
         os.environ["APPDATA"] = data
@@ -57,6 +58,8 @@ def main():
             dashboard.show_editor()
         for _ in range(8):
             app.processEvents()
+        if args.card:
+            target = dashboard._cards["demo-1"]
         args.output.parent.mkdir(parents=True, exist_ok=True)
         if not target.grab().save(str(args.output)):
             raise RuntimeError("Could not save preview")
