@@ -1,6 +1,6 @@
 """Credential types and legacy credential cleanup; no browser/cookie CLI.
 
-Desktop login is remembered-only, guarded by consent, confirmation and origin
+Desktop login is remembered-only, guarded by checkbox consent and origin
 checks. Master tokens require encrypted storage. The internal session-only
 credential helper remains for compatibility/tests, not as a desktop UI mode.
 """

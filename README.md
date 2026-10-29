@@ -12,7 +12,7 @@ Original history, attribution and AGPL-3.0 license are retained. This is a
 private standalone repository because GitHub public forks cannot be private.
 
 - **Remembered Google sign-in:** the requested desktop mode saves a powerful
-  master token with Windows encryption after consent and confirmation. It
+  master token with Windows encryption after checkbox consent. It
   renews Keep access across restarts, with no fixed app time limit.
 - **Protected remembered credentials and notes:** per-Windows-user DPAPI encryption,
   atomic saves, migration of the old plaintext cache/token, and sign-out
@@ -39,7 +39,7 @@ private standalone repository because GitHub public forks cannot be private.
 - **Google-only runtime networking:** exact Google-owned destination lists,
   direct HTTPS without environment/system proxies, and no runtime updater.
   Notes cannot fetch linked resources or launch external links. This is an
-  app-level restriction, not an OS firewall or malware-containment guarantee.
+  app-level restriction, not an OS firewall or protection from compromised software.
 
 Google’s internal API is **still unofficial**. It cannot be made supported
 by a fork. See [SECURITY.md](SECURITY.md) for limits and recovery guidance.
@@ -64,28 +64,35 @@ Run this copy from source using the commands below. Upstream installers do
 ## Connecting Google Keep
 
 1. Right-click the tray icon → **Sign in to Google Keep**
-2. Select **Remember on this PC (powerful master token, encrypted)**.
-   Read **Security details** if needed, click **Continue to Google**, and confirm.
-   Choose No/Cancel to stay offline; there is no session-only desktop option.
+2. Enter the Google account email you will sign into, select **Remember on this
+   PC (powerful master token, encrypted)**, then click **Continue to Google**.
+   The checkbox is the only storage confirmation. The compact window expands
+   only after Continue; optional explanation is under **Security details**.
+   Choose Cancel to stay offline; there is no session-only desktop option.
 3. Verify the displayed address starts with `https://accounts.google.com`.
    Complete Google's password/2FA prompts yourself. If Google blocks the embedded
    browser, stop—this app offers no security-warning bypass.
 4. On success, the window closes and notes sync into the manager. Cloud writes
    are reset to OFF after each login; enable them separately only after a backup.
 
-This is **not** a Google-approved public OAuth integration. After consent and
-confirmation, the master token is saved with Windows DPAPI in
+This is **not** a Google-approved public OAuth integration. After checkbox consent,
+the master token is saved with Windows DPAPI in
 `%APPDATA%\KeepDesktop\keep_token.dat` and reused on later starts. Keep access
 tokens are renewed as needed. This continues until local sign-out or Google's
 rejection/revocation, not for a guaranteed number of days. The previous
 session-only duration cap is not used by the desktop login.
 
-Windows encryption does not protect against malware running as you. Python
+Other software running as your Windows user can access the saved credential. Python
 cannot guarantee forensic erasure of transient strings from memory.
 Legacy credential-manager copies are cleaned up on sign-out. CLI cookie
 capture and bearer-printing commands are disabled. Revoke the device/session from
 [Google Account → Security → Your devices](https://myaccount.google.com/device-activity)
 if needed. Signing out locally does not revoke Google's server-side token.
+
+If sign-in fails, `login-validation.json` records only fixed failure categories,
+HTTP status, known Google error codes and safe request metadata. It contains no
+email, password, cookies, tokens, note text or full URLs. Background resource
+blocks appear under Security details rather than as a red login failure.
 
 ## Usage
 

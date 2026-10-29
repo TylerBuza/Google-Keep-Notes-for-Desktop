@@ -1,4 +1,4 @@
-# Experimental login review — 2026-10-28
+# Experimental login review — updated 2026-10-29
 
 ## Decision and scope
 
@@ -7,7 +7,7 @@ the master-token login. This review documents reduced exposure, not a claim
 that the master-token risk or all supply-chain risks were eliminated.
 The user subsequently requested **remembered-only desktop sign-in** and a
 visible Google URL. The previous session-only UI/duration cap has been removed,
-not silently extended. Persistent storage still requires consent and confirmation.
+not silently extended. Persistent storage still requires explicit checkbox consent.
 
 Google's [Keep API overview](https://developers.google.com/workspace/keep/api/guides)
 describes enterprise-admin access, not a supported personal-Keep replacement
@@ -19,8 +19,9 @@ unofficial Android flow is not Google-approved. If Google blocks it, stop.
 
 - Explicit risk consent before loading the sign-in page; visible allowed
   HTTPS origin/path; no secret URL query/fragment displayed or logged.
-  The warning is one line; the visible remember checkbox names the powerful,
-  encrypted master token. The longer explanation is under **Security details**.
+  At the user's request there is no warning banner. The visible remember checkbox
+  names the powerful, encrypted master token; explanation is under **Security details**.
+  A compact email/consent form expands into the browser only after Continue.
 - Exact `accounts.google.com` top-level navigation allowlist and separate restricted
   authentication/static-resource allowlist. No arbitrary third-party frames,
   executable data URLs, popups, downloads or certificate-error overrides.
@@ -33,8 +34,8 @@ unofficial Android flow is not Google-approved. If Google blocks it, stop.
 - Request only the Keep memento bearer scope, not reminders. Desktop login is
   remembered-only, with no fixed app duration cap. The encrypted master token
   renews Keep access across restarts until sign-out or Google's rejection/revocation.
-- Saving the master token requires unchecked-by-default risk consent plus a
-  second confirmation defaulting to No. No/Cancel stays offline; there is no
+- Saving the master token requires unchecked-by-default checkbox consent, with
+  no extra confirmation dialog. Cancel stays offline; there is no
   automatic fallback to session-only storage. Credentials remain DPAPI protected.
 - Cancellation, including cancellation immediately after exchange, signs out.
   Browser pages are discarded before teardown; the resource policy is removed
@@ -49,6 +50,15 @@ unofficial Android flow is not Google-approved. If Google blocks it, stop.
 - Native notes cannot load linked resources or launch external links. About
   attribution is not clickable. Runtime updater networking code is removed.
   See [SECURITY.md](../SECURITY.md) for exact hosts and the app/OS boundary.
+- Routine blocked background requests are described neutrally in Security
+  details, not as proof of sign-in failure. Page/navigation/certificate failures
+  remain visible errors. No destination restriction was relaxed for this UI change.
+- `login-validation.json` records only safe stage booleans, bounded request
+  categories, fixed known-host labels, HTTP status and known Google error codes.
+  Unknown hostnames, full URLs, identity, passwords, cookies and tokens are excluded.
+- Auth errors now separate HTTP/Google rejections from TLS, connection,
+  timeouts, local policy and storage errors. The previous generic exchange
+  message wrongly attributed all failures to Google refusal.
 
 ## Dependency checks actually performed
 
@@ -87,6 +97,32 @@ The WebEngine cookie handler now has an explicit `QNetworkCookie` Qt slot/type
 registration before network startup; without the early binding import,
 anonymous process teardown intermittently hung. No credential or note was used
 in diagnosing this.
+
+## Reported sign-in failures and changes
+
+The user reported Google's "Something went wrong" page and an apparent stall
+after accepting terms. The installed build recorded no completed bearer exchange.
+Its old generic message did not preserve the underlying reason, so the actual
+account failure is not retrospectively identified.
+
+One concrete app bug was found: the desktop always passed a blank email into
+the master exchange, although the gpsoauth protocol example supplies the account
+email. The compact form now requires that email and snapshots it before starting
+the worker; a response for a different account is rejected. The underlying
+transport refuses missing/invalid emails before network access.
+
+The browser is no longer stopped at token capture, avoiding interruption of
+Google's still-active terms navigation. Exchange/page-load watchdogs keep the
+failure cancellable. An isolated synthetic hand-off over a real anonymous Google
+page passed with a responsive GUI and clean page/profile/application shutdown;
+its fake sync engine sends no credentials or auth API requests. This is not a
+successful account login or proof that Google's real exchange will succeed.
+This revision passed **531 offline tests**, one anonymous page/cancel probe and
+two consecutive synthetic hand-off probes, all with clean application shutdown.
+
+A credential-free empty-form POST reached the fixed Google auth endpoint with
+verified TLS and returned HTTP 403. This establishes reachability only, not the
+cause of the user's authenticated failure. No account credentials were submitted.
 
 **Authenticated end-to-end login is still pending user participation.** No
 Google password/2FA prompt has been completed by the agent. To complete it:

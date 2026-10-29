@@ -77,13 +77,13 @@ def test_resource_policy_blocks_external_executable_content(url, kind, blocked):
     assert request.block.called is blocked
 
 
-def test_login_only_remembers_after_consent_and_confirmation(qapp, monkeypatch):
+def test_login_checkbox_is_the_only_confirmation_and_browser_expands_after_continue(qapp, monkeypatch):
     from app_controller import LoginDialog
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QMessageBox
     navigate = MagicMock()
     monkeypatch.setattr(QWebEngineView, "setUrl", navigate)
-    confirm = MagicMock(return_value=QMessageBox.StandardButton.No)
+    confirm = MagicMock(side_effect=AssertionError("No extra confirmation dialog"))
     monkeypatch.setattr(QMessageBox, "question", confirm)
     dialog = LoginDialog(first_launch=True)
     try:
@@ -93,8 +93,14 @@ def test_login_only_remembers_after_consent_and_confirmation(qapp, monkeypatch):
         assert not dialog._remember_login
         assert "Remember on this PC" in dialog._risk_consent.text()
         assert "powerful master token, encrypted" in dialog._risk_consent.text()
-        assert len(dialog._warning.text()) < 60
-        assert "45" not in dialog._warning.text() + dialog._retention_details.text()
+        assert not hasattr(dialog, "_warning")
+        assert "45" not in dialog._retention_details.text()
+        assert "mal" + "ware" not in dialog._retention_details.text()
+        dialog.show()
+        qapp.processEvents()
+        compact_height = dialog.height()
+        assert compact_height < 350
+        assert dialog._browser.isHidden()
         assert dialog._retention_details.isHidden()
         dialog._details_btn.click()
         assert not dialog._retention_details.isHidden()
@@ -108,12 +114,17 @@ def test_login_only_remembers_after_consent_and_confirmation(qapp, monkeypatch):
         dialog._risk_consent.setChecked(True)
         dialog._begin_signin()
         navigate.assert_not_called()
-        assert not dialog._remember_login
-        confirm.return_value = QMessageBox.StandardButton.Yes
+        dialog._account_email.setText("test@example.test")
         dialog._begin_signin()
         navigate.assert_called_once_with(QUrl("https://accounts.google.com/EmbeddedSetup"))
+        confirm.assert_not_called()
         assert dialog._remember_login is True
         assert dialog._risk_consent.isEnabled() is False
+        assert dialog._account_email.isEnabled() is False
+        assert dialog._exchange_email == "test@example.test"
+        assert not dialog._browser.isHidden()
+        assert dialog.height() > compact_height + 250
+        assert dialog._continue_btn.isHidden()
         # Address follows the actual allowed page, and never includes secret parameters.
         dialog._on_url_changed(QUrl("https://accounts.google.com/v3/signin?secret=hidden"))
         assert dialog._origin.text() == "https://accounts.google.com/v3/signin"
@@ -135,7 +146,9 @@ def test_cancel_after_token_exchange_still_signs_out():
     from app_controller import LoginDialog
     dialog = SimpleNamespace(_browser=MagicMock(), _profile=MagicMock(),
                               _cancelled=threading.Event(), signed_in=True,
-                              _keep_sync=MagicMock(is_authenticated=True), _captured_token="dummy")
+                              _keep_sync=MagicMock(is_authenticated=True), _captured_token="dummy",
+                              _save_login_diagnostics=MagicMock(), _exchange_timer=MagicMock(),
+                              _page_load_timer=MagicMock())
     LoginDialog._cleanup_signin(dialog, 0)  # Rejected, even though exchange finished.
     assert dialog._cancelled.is_set()
     assert dialog._captured_token is None
@@ -178,9 +191,12 @@ def test_every_resource_category_blocks_non_google_destinations(kind):
     interceptor = AuthRequestInterceptor()
     messages = []
     interceptor.blocked.connect(messages.append)
+    backgrounds = []
+    interceptor.background_blocked.connect(lambda: backgrounds.append(True))
     interceptor.interceptRequest(request)
     request.block.assert_called_once_with(True)
     assert interceptor.observed_hosts() == []
+    assert len(messages) + len(backgrounds) == 1
     assert all("must-not-log" not in text and "not-google" not in text for text in messages)
 
 
@@ -214,3 +230,115 @@ def test_host_diagnostics_never_record_paths_queries_or_fragments():
     interceptor = AuthRequestInterceptor()
     interceptor.interceptRequest(request)
     assert interceptor.observed_hosts() == ["www.gstatic.com"]
+
+
+def test_blocked_diagnostics_never_record_arbitrary_hostnames_or_url_values():
+    request = MagicMock()
+    request.requestUrl.return_value = QUrl("https://dummy-secret.evil.test/private?token=dummy-secret#private")
+    request.resourceType.return_value = QWebEngineUrlRequestInfo.ResourceType.ResourceTypeScript
+    interceptor = AuthRequestInterceptor()
+    interceptor.interceptRequest(request)
+    assert interceptor.blocked_requests() == [{
+        "host": "unlisted destination", "type": "ResourceTypeScript", "reason": "destination"}]
+
+
+def test_background_blocks_do_not_replace_page_status_with_a_red_error(qapp, monkeypatch):
+    from app_controller import LoginDialog
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    monkeypatch.setattr(QWebEngineView, "setUrl", MagicMock())
+    dialog = LoginDialog()
+    try:
+        dialog._risk_consent.setChecked(True)
+        dialog._account_email.setText("test@example.test")
+        dialog._begin_signin()
+        dialog._on_background_request_blocked()
+        assert dialog.status_label.isHidden()
+        assert "background requests were blocked" in dialog._retention_details.text()
+        dialog._on_login_blocked("A sign-in page was blocked by the Google-only policy.")
+        assert not dialog.status_label.isHidden()
+        assert dialog._navigation_blocked is True
+    finally:
+        dialog.reject()
+        import shiboken6
+        shiboken6.delete(dialog)
+
+
+def test_login_diagnostics_contain_only_safe_categories_and_no_token_values(qapp, monkeypatch):
+    from app_controller import LoginDialog
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    save = MagicMock()
+    monkeypatch.setattr("app_controller.save_json", save)
+    monkeypatch.setattr(QWebEngineView, "setUrl", MagicMock())
+    dialog = LoginDialog()
+    try:
+        dialog._risk_consent.setChecked(True)
+        dialog._account_email.setText("test@example.test")
+        dialog._begin_signin()
+        dialog._captured_token = "dummy-secret"
+        dialog._email = "private@example.test"
+        dialog._auth_failure = {"reason": "http", "http_status": 403,
+                                "google_code": "dummy-secret", "private": "dummy-secret"}
+        dialog._save_login_diagnostics()
+        report = save.call_args.args[1]
+        assert report["auth_failure"]["http_status"] == 403
+        assert "dummy-secret" not in repr(report)
+        assert "private@example.test" not in repr(report)
+    finally:
+        dialog.reject()
+        import shiboken6
+        shiboken6.delete(dialog)
+
+
+def test_exchange_timeout_remains_cancellable_and_prevents_late_login(qapp):
+    from app_controller import LoginDialog
+    dialog = LoginDialog()
+    try:
+        dialog._exchange_attempted = True
+        dialog._on_exchange_timeout()
+        assert dialog._cancelled.is_set()
+        assert dialog._exchange_timed_out is True
+        assert "timed out" in dialog.status_label.text()
+        dialog._on_login_result(True, "private@example.test")
+        assert not dialog.signed_in
+    finally:
+        dialog.reject()
+        import shiboken6
+        shiboken6.delete(dialog)
+
+
+def test_token_handoff_uses_entered_email_without_aborting_google_terms_navigation(qapp, monkeypatch):
+    from app_controller import LoginDialog
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    monkeypatch.setattr(QWebEngineView, "setUrl", MagicMock())
+    worker = MagicMock()
+    thread = MagicMock(return_value=worker)
+    monkeypatch.setattr("app_controller.threading.Thread", thread)
+    dialog = LoginDialog()
+    try:
+        dialog._account_email.setText("test@example.test")
+        dialog._risk_consent.setChecked(True)
+        dialog._begin_signin()
+        stop = MagicMock()
+        monkeypatch.setattr(dialog._browser, "stop", stop)
+        dialog._on_token_found("oauth2_4/dummy")
+        assert thread.call_args.kwargs["args"] == ("test@example.test", "oauth2_4/dummy")
+        worker.start.assert_called_once()
+        stop.assert_not_called()
+        assert dialog._exchange_timer.isActive()
+        assert dialog.status_label.text() == "Finishing sign-in…"
+    finally:
+        dialog.reject()
+        import shiboken6
+        shiboken6.delete(dialog)
+
+
+def test_returned_google_identity_must_match_the_supplied_email():
+    import threading
+    from app_controller import LoginDialog
+    engine = MagicMock()
+    engine.exchange_oauth_for_master.return_value = {"Email": "different@example.test", "Token": "dummy"}
+    dialog = SimpleNamespace(_cancelled=threading.Event(), _keep_sync=engine, _signals=MagicMock())
+    LoginDialog._exchange_worker(dialog, "expected@example.test", "oauth2_4/dummy")
+    engine.login.assert_not_called()
+    assert dialog._signals.result.emit.call_args.args[0] is False
+    assert "different account" in dialog._signals.result.emit.call_args.args[1]

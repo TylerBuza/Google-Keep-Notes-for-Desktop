@@ -7,12 +7,14 @@ writer. Remembered master tokens and the local notes cache use current-user
 Windows DPAPI (not machine-wide protection). Secure-storage failure is an error;
 there is no plaintext fallback. At the user's request the desktop login now
 offers only **Remember on this PC**, with no fixed app duration cap. Saving the
-powerful master token still requires explicit consent and a separate
-confirmation, defaulting to No. Refusing it stays offline, not a different
+powerful master token requires checking the explicit Remember box before
+Continue; the requested UI has no second confirmation. Leaving it unchecked stays offline, not a different
 credential-retention mode. Old credentials cannot auto-login without the
 new consent version and explicit remember preference. Credential-manager access
 is limited to Windows' native backend for legacy cleanup. Token responses are
 not included in logs or exception messages; credentials have redacted reprs.
+The account email is provided explicitly before Continue; it is needed by the
+exchange protocol and is not read from Google's password/verification fields.
 
 The experimental login window does not load Google's page until consent. It
 displays the HTTPS origin and path (not secret query/fragment values), permits
@@ -25,6 +27,27 @@ with memory-only cookies/cache/permissions; cancellation discards the page and
 clears cookies. Manual-cookie paste and command-line token capture are removed.
 The network interceptor remains active until page destruction, then detaches
 before profile deletion to prevent Qt/Python shutdown deadlocks.
+
+Before Continue, the browser is hidden and the window sizes to the compact
+form. Continue expands it and loads Google without another confirmation. There
+is no warning banner; credential-retention facts stay in the visible checkbox
+and optional Security details. Routine background resource blocks remain
+blocked but do not overwrite the page status with a red failure; blocked
+frames/navigation and certificate errors still produce visible errors.
+
+Token capture no longer immediately stops Google's active terms/consent
+navigation. A worker performs the exchange while the UI stays cancellable;
+page-load and exchange watchdogs report stalls without bypassing Google.
+Cancellation/timeout prevents a late worker from retaining credentials.
+
+`login-validation.json` contains booleans for page/cookie/exchange stages, safe
+HTTP/failure categories, known Google error codes and bounded blocked-resource
+metadata. Full URLs, arbitrary hostnames, emails, cookies, passwords, token
+values, notes and note counts are excluded. Blocked hostnames are reported only
+from a fixed set of known Google hosts; other names become "unlisted destination".
+Transport errors distinguish TLS/connection/timeout/local-policy failures from
+actual Google HTTP/structured rejections. A generic failure is not described
+as proof that Google rejected the user's account.
 
 The auth transport only POSTs to `https://android.clients.google.com/auth`, with
 TLS >=1.2, certificate and hostname validation, a pinned CA-bundle dependency,
@@ -122,7 +145,7 @@ Keep Qt/Chromium updated through deliberate, tested dependency upgrades.
 - Advisory scans do not prove that every dependency, native Qt/Chromium
   component, compiler or OS service is vulnerability-free. No independent
   line-by-line audit or external penetration test is claimed.
-- DPAPI protects files at rest, not against malware running as you, an
+- DPAPI protects files at rest, not against other software running as you, an
   administrator, a compromised OS, or a compromised Python dependency. It
   is not a separate-password vault. Your Windows account is the boundary.
 - DPAPI files generally cannot be opened by another Windows user or after

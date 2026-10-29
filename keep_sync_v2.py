@@ -121,6 +121,7 @@ class KeepSyncV2:
         self._email: Optional[str] = None
         self._authenticated = False
         self._lock = threading.Lock()
+        self.last_auth_failure = None
         # Mirror cache so push_note() can look up the corresponding
         # ServerNote without re-syncing.
         self._server_notes: dict[str, ServerNote] = {}
@@ -170,6 +171,7 @@ class KeepSyncV2:
         - neither: try loading from keyring, then v1's stored token.
         """
         self._authenticated = False
+        self.last_auth_failure = None
         if consent is not True or (cancel_event and cancel_event.is_set()):
             return False
         remember = remember is True
@@ -196,7 +198,8 @@ class KeepSyncV2:
         try:
             bearer = creds.mint_bearer()
         except AuthError as exc:
-            log.error("v2 bearer mint failed: %s", exc)
+            self.last_auth_failure = exc.diagnostic("keep-bearer")
+            log.error("Keep access request failed (%s)", exc.reason)
             self._authenticated = False
             return False
 
@@ -210,6 +213,7 @@ class KeepSyncV2:
                 clear_token(email)
                 creds = SessionCredentials(email, bearer, time.monotonic() + SESSION_SECONDS)
         except Exception:
+            self.last_auth_failure = AuthError("Secure storage failed.", reason="storage").diagnostic("storage")
             log.error("Secure credential storage failed; login aborted")
             return False
 
@@ -223,20 +227,25 @@ class KeepSyncV2:
         log.info("v2 authentication succeeded")
         return True
 
-    @staticmethod
-    def exchange_oauth_for_master(email: str, oauth_token: str) -> Optional[dict]:
+    def exchange_oauth_for_master(self, email: str, oauth_token: str) -> Optional[dict]:
         """Same shape as v1 — exchange an EmbeddedSetup oauth_token for a
-        master token via gpsoauth. Returns the gpsoauth response dict,
-        or None on failure."""
+        master token via the locked Google transport. Returns the safe token
+        record, or None with non-secret last_auth_failure metadata."""
         android_id = secrets.token_hex(8)
+        self.last_auth_failure = None
         try:
             resp = exchange_web_token(email, oauth_token, android_id)
             if not resp.get("Token"):
                 log.error("Google rejected the token exchange")
                 return None
             return resp
-        except Exception as exc:  # noqa: BLE001
-            log.error("Token exchange failed (%s)", type(exc).__name__)
+        except AuthError as exc:
+            self.last_auth_failure = exc.diagnostic("token-exchange")
+            log.error("Token exchange failed (%s)", exc.reason)
+            return None
+        except Exception:  # noqa: BLE001
+            self.last_auth_failure = AuthError("Sign-in failed.").diagnostic("token-exchange")
+            log.error("Token exchange failed unexpectedly")
             return None
 
     # ----- read ---------------------------------------------------------

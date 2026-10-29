@@ -21,7 +21,7 @@ def connection(monkeypatch):
 
 def test_master_exchange_uses_locked_tls_transport_and_discards_extra_session_tokens(connection):
     session, response = connection
-    result = transport.exchange_web_token("", "oauth2_4/dummy-web-token", "device")
+    result = transport.exchange_web_token("test@example.test", "oauth2_4/dummy-web-token", "device")
     assert result == {"Token": "dummy-master", "Email": "test@example.test", "AndroidId": "device"}
     assert session.trust_env is False
     args, kwargs = session.post.call_args
@@ -31,6 +31,7 @@ def test_master_exchange_uses_locked_tls_transport_and_discards_extra_session_to
     assert kwargs["timeout"] == (10, 30)
     assert kwargs["stream"] is True
     assert session.post.call_count == 1
+    assert kwargs["data"]["Email"] == "test@example.test"
 
 
 def test_tls_adapter_requires_certificate_and_hostname_validation():
@@ -60,10 +61,13 @@ def test_rejected_requests_never_redirect_retry_or_expose_response(connection, s
     response.status_code = status
     response.text = "dummy-secret-response"
     with pytest.raises(transport.AuthError) as error:
-        transport.exchange_web_token("", "oauth2_4/dummy", "device")
+        transport.exchange_web_token("test@example.test", "oauth2_4/dummy", "device")
     assert "dummy-secret" not in str(error.value)
     assert session.post.call_count == 1
     response.iter_content.assert_not_called()
+    assert error.value.diagnostic("token-exchange") == {
+        "stage": "token-exchange", "reason": "http", "http_status": status, "google_code": None}
+    assert str(status) in transport.auth_failure_message(error.value.diagnostic("token-exchange"))
 
 
 @pytest.mark.parametrize("raw", [b"Token=dummy-secret\nToken=duplicate\n", b"not-a-key-value-response",
@@ -72,7 +76,7 @@ def test_invalid_or_oversized_responses_fail_without_echoing_secrets(connection,
     session, response = connection
     response.iter_content.return_value = [raw]
     with pytest.raises(transport.AuthError) as error:
-        transport.exchange_web_token("", "oauth2_4/dummy", "device")
+        transport.exchange_web_token("test@example.test", "oauth2_4/dummy", "device")
     assert "dummy-secret" not in str(error.value)
 
 
@@ -80,7 +84,7 @@ def test_auth_timeout_is_bounded_and_does_not_echo_dependency_exception(connecti
     session, response = connection
     session.post.side_effect = requests.Timeout("dummy-secret-in-dependency-exception")
     with pytest.raises(transport.AuthError) as error:
-        transport.exchange_web_token("", "oauth2_4/dummy", "device")
+        transport.exchange_web_token("test@example.test", "oauth2_4/dummy", "device")
     assert "dummy-secret" not in str(error.value)
     assert session.post.call_count == 1
 
@@ -88,5 +92,64 @@ def test_auth_timeout_is_bounded_and_does_not_echo_dependency_exception(connecti
 def test_manual_or_malformed_web_tokens_never_reach_google(connection):
     session, response = connection
     with pytest.raises(transport.AuthError):
-        transport.exchange_web_token("", "unsupported-cookie", "device")
+        transport.exchange_web_token("test@example.test", "unsupported-cookie", "device")
+    session.post.assert_not_called()
+
+
+@pytest.mark.parametrize("error,reason", [
+    (requests.Timeout("dummy-secret"), "timeout"),
+    (requests.exceptions.SSLError("dummy-secret"), "tls"),
+    (requests.ConnectionError("dummy-secret"), "connection"),
+    (transport.GoogleTransportPolicyError("dummy-secret"), "policy"),
+])
+def test_auth_transport_reports_specific_non_secret_failure_categories(connection, error, reason):
+    session, response = connection
+    session.post.side_effect = error
+    with pytest.raises(transport.AuthError) as result:
+        transport.exchange_web_token("test@example.test", "oauth2_4/dummy", "device")
+    diagnostic = result.value.diagnostic("token-exchange")
+    assert diagnostic["reason"] == reason
+    assert diagnostic["http_status"] is None
+    assert "dummy-secret" not in repr(diagnostic)
+    assert "dummy-secret" not in transport.auth_failure_message(diagnostic)
+
+
+@pytest.mark.parametrize("code,expected", [("BadAuthentication", "BadAuthentication"),
+    ("NeedsBrowser", "NeedsBrowser"), ("dummy-secret-google-value", None)])
+def test_only_known_google_rejection_codes_reach_diagnostics(connection, code, expected):
+    session, response = connection
+    response.iter_content.return_value = [f"Error={code}\n".encode()]
+    with pytest.raises(transport.AuthError) as error:
+        transport.exchange_web_token("test@example.test", "oauth2_4/dummy", "device")
+    details = error.value.diagnostic("token-exchange")
+    assert details["reason"] == "google"
+    assert details["google_code"] == expected
+    assert "dummy-secret" not in repr(details)
+
+
+def test_sync_exposes_safe_exchange_failure_without_claiming_google_rejected_the_token(monkeypatch):
+    from keep_sync_v2 import KeepSyncV2
+    def fail(*args):
+        raise transport.AuthError("dummy-secret-error", reason="tls")
+    monkeypatch.setattr("keep_sync_v2.exchange_web_token", fail)
+    sync = KeepSyncV2()
+    assert sync.exchange_oauth_for_master("", "oauth2_4/dummy") is None
+    assert sync.last_auth_failure["reason"] == "tls"
+    assert "HTTPS" in transport.auth_failure_message(sync.last_auth_failure)
+    assert "dummy-secret" not in repr(sync.last_auth_failure)
+
+
+def test_invalid_failure_metadata_is_sanitized_before_display_or_storage():
+    details = transport.safe_auth_failure({"reason": {"secret": "dummy-secret"},
+        "stage": "dummy-secret", "google_code": ["dummy-secret"], "http_status": "dummy-secret"})
+    assert details == {"stage": "unknown", "reason": "unknown", "http_status": None, "google_code": None}
+    assert transport.auth_failure_message(details) == "Sign-in did not finish."
+
+
+@pytest.mark.parametrize("email", ["", " ", "not-an-email", "test@example.test\n", "a@b", "a@@example.test"])
+def test_missing_or_invalid_account_email_never_reaches_google(connection, email):
+    session, response = connection
+    with pytest.raises(transport.AuthError) as error:
+        transport.exchange_web_token(email, "oauth2_4/dummy", "device")
+    assert error.value.reason == "email"
     session.post.assert_not_called()

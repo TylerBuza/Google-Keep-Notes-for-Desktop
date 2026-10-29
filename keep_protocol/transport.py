@@ -9,6 +9,10 @@ from requests.adapters import HTTPAdapter
 from network_policy import AUTH_URL, CHANGES_URL, CHANGES_URL_WRITE
 
 
+class GoogleTransportPolicyError(requests.RequestException):
+    """A local destination/TLS/proxy policy rejection, not a Google response."""
+
+
 class _GoogleTLSContext(ssl.SSLContext):
     def set_alpn_protocols(self, protocols):
         # Android's legacy auth endpoint rejects ALPN. Certificate/hostname
@@ -40,7 +44,7 @@ class GoogleEndpointAdapter(HTTPAdapter):
         if (request.method != "POST" or request.url not in self._urls
                 or kwargs.get("proxies") or kwargs.get("cert")
                 or kwargs.get("verify", True) not in (True, certifi.where())):
-            raise requests.RequestException("Blocked a request outside the Google transport policy.")
+            raise GoogleTransportPolicyError("Blocked a request outside the Google transport policy.")
         kwargs["verify"] = certifi.where()
         kwargs["proxies"] = {}
         kwargs["timeout"] = (10, 30)

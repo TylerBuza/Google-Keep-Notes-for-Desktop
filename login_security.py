@@ -44,17 +44,25 @@ def allowed_frame_url(url):
 
 class AuthRequestInterceptor(QWebEngineUrlRequestInterceptor):
     blocked = Signal(str)
+    background_blocked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._reported = set()
         self._allowed_hosts = set()
+        self._blocked_requests = set()
         self._hosts_lock = threading.Lock()
 
     def observed_hosts(self):
         """Allowed hostnames only: no URL paths, queries, accounts or secrets."""
         with self._hosts_lock:
             return sorted(self._allowed_hosts)
+
+    def blocked_requests(self):
+        """Fixed categories and known Google hosts only; never arbitrary URLs."""
+        with self._hosts_lock:
+            return [{"host": host, "type": kind, "reason": reason}
+                    for host, kind, reason in sorted(self._blocked_requests)]
 
     def interceptRequest(self, info):
         url = info.requestUrl()
@@ -83,10 +91,26 @@ class AuthRequestInterceptor(QWebEngineUrlRequestInterceptor):
                 self._allowed_hosts.add(url.host())
         if not allowed:
             info.block(True)
-            host = url.host() or url.scheme() or "unknown"
-            if host not in self._reported:
-                self._reported.add(host)
-                self.blocked.emit("Blocked a sign-in request outside the allowed Google origins.")
+            # These two known Google-owned aliases are diagnostic labels, not
+            # new allowlist entries. Unknown hosts might encode private values,
+            # so never record or display their actual hostname.
+            known_hosts = RESOURCE_HOSTS | {"accounts.youtube.com", "www.recaptcha.net"}
+            host = url.host() if url.host() in known_hosts else "unlisted destination"
+            frame = kind in (resource.ResourceTypeMainFrame, resource.ResourceTypeSubFrame,
+                             resource.ResourceTypeNavigationPreloadMainFrame,
+                             resource.ResourceTypeNavigationPreloadSubFrame)
+            reason = ("frame-policy" if frame else "request-type") if allowed_https_url(url, RESOURCE_HOSTS) else "destination"
+            category = "page" if frame else "background"
+            with self._hosts_lock:
+                if len(self._blocked_requests) < 64:
+                    self._blocked_requests.add((host, kind.name, reason))
+                report = category not in self._reported
+                self._reported.add(category)
+            if report:
+                if frame:
+                    self.blocked.emit("A sign-in page was blocked by the Google-only policy.")
+                else:
+                    self.background_blocked.emit()
 
 
 class GuardedGooglePage(QWebEnginePage):
