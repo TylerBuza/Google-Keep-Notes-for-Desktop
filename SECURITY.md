@@ -13,8 +13,11 @@ credential-retention mode. Old credentials cannot auto-login without the
 new consent version and explicit remember preference. Credential-manager access
 is limited to Windows' native backend for legacy cleanup. Token responses are
 not included in logs or exception messages; credentials have redacted reprs.
-The account email is provided explicitly before Continue; it is needed by the
-exchange protocol and is not read from Google's password/verification fields.
+Email is entered only on Google's page. The initial token exchange omits the
+Email field rather than guessing or posting an empty value. It must return a
+valid Google account identity before bearer minting or credential persistence.
+There is no DOM/form scraping, URL-derived identity or local email fallback.
+Compatibility of this identity-returning exchange still requires a user test.
 
 The experimental login window does not load Google's page until consent. It
 displays the HTTPS origin and path (not secret query/fragment values), permits
@@ -39,6 +42,10 @@ Token capture no longer immediately stops Google's active terms/consent
 navigation. A worker performs the exchange while the UI stays cancellable;
 page-load and exchange watchdogs report stalls without bypassing Google.
 Cancellation/timeout prevents a late worker from retaining credentials.
+Worker results now pass through a Python queue and are consumed on the GUI
+thread, rather than calling Qt from the authentication worker. The page is
+re-enabled after a result; cookies are cleared on discarded-page teardown,
+not while Google's live terms/navigation is still completing.
 
 `login-validation.json` contains booleans for page/cookie/exchange stages, safe
 HTTP/failure categories, known Google error codes and bounded blocked-resource
@@ -48,6 +55,16 @@ from a fixed set of known Google hosts; other names become "unlisted destination
 Transport errors distinguish TLS/connection/timeout/local-policy failures from
 actual Google HTTP/structured rejections. A generic failure is not described
 as proof that Google rejected the user's account.
+Response-format diagnostics additionally distinguish HTML, JSON, invalid
+encoding, oversized replies and conflicting credential fields without saving
+the response body. Parsing ignores unused extension metadata, but requires
+unambiguous, bounded printable token fields and rejects HTML/JSON masquerading
+as the legacy plain-text protocol. A valid Google-returned email is mandatory.
+
+An isolated successful synthetic hand-off remains responsive and closes its
+page/profile, but explicit application destruction can still hang. A cancel-only
+probe exits normally. This separate WebEngine shutdown issue is unresolved;
+neither authenticated sign-in nor the user's reported freeze is claimed fixed.
 
 The auth transport only POSTs to `https://android.clients.google.com/auth`, with
 TLS >=1.2, certificate and hostname validation, a pinned CA-bundle dependency,

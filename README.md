@@ -64,11 +64,13 @@ Run this copy from source using the commands below. Upstream installers do
 ## Connecting Google Keep
 
 1. Right-click the tray icon → **Sign in to Google Keep**
-2. Enter the Google account email you will sign into, select **Remember on this
-   PC (powerful master token, encrypted)**, then click **Continue to Google**.
+2. Select **Remember on this PC (powerful master token, encrypted)**, then click
+   **Continue to Google**. Enter your email only on Google's sign-in page.
    The checkbox is the only storage confirmation. The compact window expands
    only after Continue; optional explanation is under **Security details**.
    Choose Cancel to stay offline; there is no session-only desktop option.
+   The app requires Google to return the account identity; it does not scrape
+   the sign-in form or fall back to a separately entered email.
 3. Verify the displayed address starts with `https://accounts.google.com`.
    Complete Google's password/2FA prompts yourself. If Google blocks the embedded
    browser, stop—this app offers no security-warning bypass.
@@ -93,6 +95,9 @@ If sign-in fails, `login-validation.json` records only fixed failure categories,
 HTTP status, known Google error codes and safe request metadata. It contains no
 email, password, cookies, tokens, note text or full URLs. Background resource
 blocks appear under Security details rather than as a red login failure.
+The authenticated flow is not yet verified, and a separate browser shutdown
+hang remains under investigation; these changes are not a claim that every
+reported freeze is resolved.
 
 ## Usage
 

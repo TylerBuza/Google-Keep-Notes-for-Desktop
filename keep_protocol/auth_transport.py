@@ -20,26 +20,34 @@ class AuthError(RuntimeError):
     """Only fixed, non-secret diagnostics may cross the auth boundary."""
 
     REASONS = frozenset({"http", "google", "timeout", "tls", "connection", "policy",
-                         "response", "cookie", "email", "master-missing", "bearer-missing", "storage", "unknown"})
+                         "response", "cookie", "identity", "master-missing", "bearer-missing", "storage", "unknown"})
     GOOGLE_CODES = frozenset({"BadAuthentication", "NeedsBrowser", "WebLoginRequired",
                               "DeviceManagementRequired", "CaptchaRequired", "ServiceDisabled"})
+    RESPONSE_KINDS = frozenset({"html", "json", "invalid-encoding", "oversized",
+                                "invalid-fields", "conflicting-fields"})
 
-    def __init__(self, message, *, reason="unknown", status=None, google_code=None):
+    def __init__(self, message, *, reason="unknown", status=None, google_code=None, response_kind=None):
         super().__init__(message)
         self.reason = reason if isinstance(reason, str) and reason in self.REASONS else "unknown"
         self.status = status if type(status) is int and 100 <= status <= 599 else None
         self.google_code = google_code if isinstance(google_code, str) and google_code in self.GOOGLE_CODES else None
+        self.response_kind = (response_kind if isinstance(response_kind, str)
+                              and response_kind in self.RESPONSE_KINDS else None)
 
     def diagnostic(self, stage):
-        return {"stage": stage if isinstance(stage, str) and stage in ("token-exchange", "keep-bearer", "storage") else "unknown",
-                "reason": self.reason, "http_status": self.status, "google_code": self.google_code}
+        result = {"stage": stage if isinstance(stage, str) and stage in ("token-exchange", "keep-bearer", "storage") else "unknown",
+                  "reason": self.reason, "http_status": self.status, "google_code": self.google_code}
+        if self.response_kind:
+            result["response_kind"] = self.response_kind
+        return result
 
 
 def safe_auth_failure(failure):
     if not isinstance(failure, dict):
         return None
     return AuthError("Sign-in failed.", reason=failure.get("reason"),
-                     status=failure.get("http_status"), google_code=failure.get("google_code")).diagnostic(
+                     status=failure.get("http_status"), google_code=failure.get("google_code"),
+                     response_kind=failure.get("response_kind")).diagnostic(
                          failure.get("stage"))
 
 
@@ -55,6 +63,11 @@ def auth_failure_message(failure):
         if failure.get("google_code") in ("NeedsBrowser", "WebLoginRequired", "DeviceManagementRequired"):
             return "Google requires a sign-in step this app cannot complete."
         return "Google rejected the sign-in token."
+    if reason == "response":
+        if failure.get("response_kind") == "html":
+            return "Google returned a web page instead of a sign-in response."
+        if failure.get("response_kind") == "conflicting-fields":
+            return "Google returned conflicting sign-in fields."
     return {
         "timeout": "The Google sign-in request timed out.",
         "tls": "Could not verify Google's HTTPS connection.",
@@ -62,7 +75,7 @@ def auth_failure_message(failure):
         "policy": "The app blocked the request under its Google-only policy.",
         "response": "Google returned an unsupported sign-in response.",
         "cookie": "Google did not provide a supported sign-in token.",
-        "email": "Enter the email of the Google account you are signing into.",
+        "identity": "Google did not return an account identity. Sign-in stopped.",
         "master-missing": "Google did not issue a master token.",
         "bearer-missing": "Google did not issue Keep access.",
         "storage": "Could not save the encrypted sign-in credential.",
@@ -78,6 +91,11 @@ def valid_account_email(email):
     return bool(local and "." in domain and not domain.startswith(".") and not domain.endswith("."))
 
 
+def _valid_token(value):
+    return (isinstance(value, str) and 1 <= len(value) <= 16384
+            and all(33 <= ord(char) <= 126 for char in value))
+
+
 def _post(form: dict) -> dict[str, str]:
     try:
         with google_session(auth=True) as session:
@@ -90,21 +108,48 @@ def _post(form: dict) -> dict[str, str]:
                 for chunk in response.iter_content(4096):
                     raw.extend(chunk)
                     if len(raw) > MAX_RESPONSE_BYTES:
-                        raise AuthError("Google returned an unsupported authentication response.", reason="response")
+                        raise AuthError("Google returned an unsupported authentication response.",
+                                        reason="response", response_kind="oversized", status=200)
+                content_type = response.headers.get("Content-Type", "")
+                if not isinstance(content_type, str):
+                    content_type = ""
         try:
-            text = raw.decode("utf-8")
+            text = raw.decode("utf-8-sig")
         except UnicodeDecodeError:
-            raise AuthError("Google returned an unsupported authentication response.", reason="response") from None
+            raise AuthError("Google returned an unsupported authentication response.", reason="response",
+                            response_kind="invalid-encoding", status=200) from None
+        beginning = text.lstrip()[:64].lower()
+        if "text/html" in content_type.lower() or beginning.startswith("<"):
+            raise AuthError("Google returned a web page.", reason="response", response_kind="html", status=200)
+        if "application/json" in content_type.lower() or beginning.startswith(("{", "[")):
+            raise AuthError("Google returned another response format.", reason="response", response_kind="json", status=200)
         result = {}
+        fields = frozenset({"Token", "Auth", "Email", "Error"})
         for line in text.splitlines():
-            if not line:
+            if not line.strip():
                 continue
             name, separator, value = line.partition("=")
-            if not separator or not name.isascii() or not name.replace("_", "").isalnum() or name in result:
-                raise AuthError("Google returned an unsupported authentication response.", reason="response")
+            # Non-credential extension metadata is irrelevant and is discarded,
+            # including repeats. Do not reject Google's whole response because
+            # an unused field name contains punctuation or has an extra line.
+            if name not in fields:
+                continue
+            if not separator:
+                raise AuthError("Google returned an invalid sign-in field.", reason="response",
+                                response_kind="invalid-fields", status=200)
+            if name in result and result[name] != value:
+                raise AuthError("Google returned conflicting sign-in fields.", reason="response",
+                                response_kind="conflicting-fields", status=200)
             result[name] = value
+        if not result:
+            raise AuthError("Google returned no supported sign-in fields.", reason="response",
+                            response_kind="invalid-fields", status=200)
         if result.get("Error"):
             raise AuthError("Google rejected the sign-in token.", reason="google", google_code=result["Error"])
+        for name in ("Token", "Auth"):
+            if name in result and not _valid_token(result[name]):
+                raise AuthError("Google returned an invalid sign-in field.", reason="response",
+                                response_kind="invalid-fields", status=200)
         return result
     except AuthError:
         raise
@@ -122,13 +167,11 @@ def _post(form: dict) -> dict[str, str]:
         raise AuthError("Google authentication failed securely. Check the connection or try again.") from None
 
 
-def exchange_web_token(email: str, web_token: str, android_id: str) -> dict[str, str]:
-    if not valid_account_email(email):
-        raise AuthError("Account email is required for this exchange.", reason="email")
-    if not isinstance(web_token, str) or not web_token.startswith("oauth2_4/") or len(web_token) > 16384:
+def exchange_web_token(web_token: str, android_id: str) -> dict[str, str]:
+    if not _valid_token(web_token) or not web_token.startswith("oauth2_4/"):
         raise AuthError("Unsupported Google sign-in token.", reason="cookie")
     result = _post({
-        "accountType": "HOSTED_OR_GOOGLE", "Email": email,
+        "accountType": "HOSTED_OR_GOOGLE",
         "has_permission": 1, "add_account": 1, "ACCESS_TOKEN": 1,
         "Token": web_token, "service": "ac2dm", "source": "android",
         "androidId": android_id, "device_country": "us", "operatorCountry": "us",
@@ -137,8 +180,10 @@ def exchange_web_token(email: str, web_token: str, android_id: str) -> dict[str,
     })
     if not result.get("Token"):
         raise AuthError("Google did not issue a master token.", reason="master-missing")
+    if not valid_account_email(result.get("Email")):
+        raise AuthError("Google did not return an account identity.", reason="identity")
     # Discard SID/LSID and any other broad session credentials in the response.
-    return {"Token": result["Token"], "Email": result.get("Email") or email, "AndroidId": android_id}
+    return {"Token": result["Token"], "Email": result["Email"], "AndroidId": android_id}
 
 
 def mint_keep_bearer(email: str, master_token: str, android_id: str) -> str:

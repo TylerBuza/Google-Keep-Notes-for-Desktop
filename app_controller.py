@@ -5,6 +5,7 @@ import os
 import time
 import uuid
 import threading
+from queue import Empty, SimpleQueue
 from functools import partial
 
 from PySide6.QtCore import Qt, QTimer, Slot, Signal, QObject, QUrl
@@ -323,8 +324,7 @@ EMBEDDED_SETUP_URL = "https://accounts.google.com/EmbeddedSetup"
 
 
 class _LoginSignals(QObject):
-    """Cross-thread signal for login result."""
-    result = Signal(bool, str)       # (success, email_or_error)
+    """Qt cookie notification; authentication results use a Python queue."""
     token_found = Signal(str)        # oauth_token cookie value
 
 
@@ -352,7 +352,6 @@ class LoginDialog(QDialog):
         self._navigation_blocked = False
         self._background_requests_blocked = False
         self._auth_failure = None
-        self._exchange_email = ""
         self._page_stalled = False
         self._exchange_timed_out = False
         self._exchange_timer = QTimer(self)
@@ -363,8 +362,11 @@ class LoginDialog(QDialog):
         self._page_load_timer.setSingleShot(True)
         self._page_load_timer.setInterval(45000)
         self._page_load_timer.timeout.connect(self._on_page_load_stalled)
-        self._signals = _LoginSignals()
-        self._signals.result.connect(self._on_login_result)
+        self._login_results = SimpleQueue()
+        self._worker_result_timer = QTimer(self)
+        self._worker_result_timer.setInterval(50)
+        self._worker_result_timer.timeout.connect(self._consume_login_result)
+        self._signals = _LoginSignals(self)
         self._signals.token_found.connect(self._on_token_found)
 
         layout = QVBoxLayout(self)
@@ -372,12 +374,6 @@ class LoginDialog(QDialog):
         layout.setSpacing(0)
 
         # No network sign-in page loads before explicit informed consent.
-        self._account_email = QLineEdit()
-        self._account_email.setPlaceholderText("Google account email")
-        self._account_email.setAccessibleName("Google account email for token exchange")
-        self._account_email.setInputMethodHints(Qt.InputMethodHint.ImhEmailCharactersOnly |
-                                              Qt.InputMethodHint.ImhNoPredictiveText)
-        layout.addWidget(self._account_email)
         self._risk_consent = QCheckBox("Remember on this PC (powerful master token, encrypted)")
         layout.addWidget(self._risk_consent)
         self._details_btn = QPushButton("Security details")
@@ -406,7 +402,6 @@ class LoginDialog(QDialog):
         self._details_btn.setAutoDefault(False)
         self._continue_btn.setEnabled(False)
         self._risk_consent.toggled.connect(self._update_continue_enabled)
-        self._account_email.textChanged.connect(self._update_continue_enabled)
         self._continue_btn.clicked.connect(self._begin_signin)
         layout.addWidget(self._continue_btn)
 
@@ -485,18 +480,15 @@ class LoginDialog(QDialog):
     @Slot()
     def _update_continue_enabled(self):
         self._continue_btn.setEnabled(self._risk_consent.isChecked()
-            and valid_account_email(self._account_email.text().strip()) and not self._signin_requested)
+            and not self._signin_requested)
 
     def _begin_signin(self):
-        if (not self._risk_consent.isChecked() or self._signin_requested
-                or not valid_account_email(self._account_email.text().strip())):
+        if not self._risk_consent.isChecked() or self._signin_requested:
             return
-        self._exchange_email = self._account_email.text().strip()
         self._remember_login = True
         self._login_started = True
         self._signin_requested = True
         self._risk_consent.setEnabled(False)
-        self._account_email.setEnabled(False)
         self._continue_btn.hide()
         self._details_btn.setChecked(False)
         self._browser.show()
@@ -578,12 +570,14 @@ class LoginDialog(QDialog):
 
     def _cleanup_signin(self, result):
         self._exchange_timer.stop()
+        self._worker_result_timer.stop()
         self._page_load_timer.stop()
         self._save_login_diagnostics()
         self._login_started = False
         accepted = result == QDialog.DialogCode.Accepted and self.signed_in
         if not accepted:
             self._cancelled.set()
+        self._browser.setEnabled(True)
         self._browser.stop()
         self._browser.hide()
         page = self._browser.page()
@@ -629,41 +623,54 @@ class LoginDialog(QDialog):
         self._browser.setEnabled(False)
         self._show_status("Finishing sign-in…")
         self._exchange_timer.start()
+        self._worker_result_timer.start()
         threading.Thread(
-            target=self._exchange_worker, args=(self._exchange_email, oauth_token), daemon=True
+            target=self._exchange_worker, args=(oauth_token,), daemon=True
         ).start()
 
     @Slot()
     def _on_exchange_timeout(self):
         if self._exchange_attempted and not self.signed_in:
+            self._worker_result_timer.stop()
             self._exchange_timed_out = True
             self._cancelled.set()
             self._show_status("Sign-in timed out. Cancel this window, then try again.", error=True)
             self._save_login_diagnostics()
 
-    def _exchange_worker(self, email, oauth_token):
+    def _queue_login_result(self, success, message):
+        # This method may run in a Python worker. Do not emit a Qt signal or
+        # access a widget from that thread, including after dialog cancellation.
+        if not self._cancelled.is_set():
+            self._login_results.put((success, message))
+
+    @Slot()
+    def _consume_login_result(self):
+        try:
+            result = self._login_results.get_nowait()
+        except Empty:
+            return
+        self._on_login_result(*result)
+
+    def _exchange_worker(self, oauth_token):
         """Runs in a background thread: exchange oauth_token → master_token → login."""
         if self._cancelled.is_set() or not self._keep_sync:
-            self._signals.result.emit(False, "Internal error: no sync object.")
+            self._queue_login_result(False, "Internal error: no sync object.")
             return
 
-        resp = self._keep_sync.exchange_oauth_for_master(email, oauth_token)
+        resp = self._keep_sync.exchange_oauth_for_master(oauth_token)
         if not resp:
             self._auth_failure = getattr(self._keep_sync, "last_auth_failure", None)
-            self._signals.result.emit(
+            self._queue_login_result(
                 False, auth_failure_message(self._auth_failure)
             )
             return
 
         master_token = resp.get("Token")
-        # Google returns the canonical email in the response; prefer that
-        # over whatever the user (didn't) type.
-        resolved_email = resp.get("Email") or email or ""
-        if not resolved_email or "@" not in resolved_email:
-            self._signals.result.emit(False, "Google did not return a verified account identity.")
-            return
-        if email and resolved_email.casefold() != email.casefold():
-            self._signals.result.emit(False, "Google returned a different account. Start again with that account's email.")
+        # Only Google's authenticated exchange can supply account identity.
+        # Never scrape its form or guess from local data or an editable URL.
+        resolved_email = resp.get("Email")
+        if not valid_account_email(resolved_email):
+            self._queue_login_result(False, "Google did not return a verified account identity.")
             return
 
         # Now authenticate through the hardened Keep protocol client.
@@ -678,17 +685,20 @@ class LoginDialog(QDialog):
                 self._keep_sync.logout()
             return
         if ok:
-            self._signals.result.emit(True, resolved_email or "(unknown)")
+            self._queue_login_result(True, resolved_email)
         else:
             self._auth_failure = getattr(self._keep_sync, "last_auth_failure", None)
-            self._signals.result.emit(False, auth_failure_message(self._auth_failure))
+            self._queue_login_result(False, auth_failure_message(self._auth_failure))
 
     @Slot(bool, str)
     def _on_login_result(self, success, message):
         self._exchange_timer.stop()
+        self._worker_result_timer.stop()
         self._login_started = False
         self._captured_token = None
-        self._profile.cookieStore().deleteAllCookies()
+        self._browser.setEnabled(True)
+        # Do not clear Google's cookies while its terms/navigation is still
+        # live. The discarded, off-record page is cleared on dialog teardown.
         if self._cancelled.is_set():
             return
         if success:
@@ -723,7 +733,7 @@ class LoginDialog(QDialog):
         if self._login_started:
             self._browser.setFocus()
         else:
-            self._account_email.setFocus()
+            self._risk_consent.setFocus()
 
     def get_email(self):
         return getattr(self, "_email", "")

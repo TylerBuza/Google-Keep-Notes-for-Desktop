@@ -227,14 +227,14 @@ class KeepSyncV2:
         log.info("v2 authentication succeeded")
         return True
 
-    def exchange_oauth_for_master(self, email: str, oauth_token: str) -> Optional[dict]:
-        """Same shape as v1 — exchange an EmbeddedSetup oauth_token for a
+    def exchange_oauth_for_master(self, oauth_token: str) -> Optional[dict]:
+        """Exchange an EmbeddedSetup oauth_token for a
         master token via the locked Google transport. Returns the safe token
         record, or None with non-secret last_auth_failure metadata."""
         android_id = secrets.token_hex(8)
         self.last_auth_failure = None
         try:
-            resp = exchange_web_token(email, oauth_token, android_id)
+            resp = exchange_web_token(oauth_token, android_id)
             if not resp.get("Token"):
                 log.error("Google rejected the token exchange")
                 return None

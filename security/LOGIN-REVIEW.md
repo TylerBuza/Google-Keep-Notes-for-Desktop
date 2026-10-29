@@ -21,7 +21,8 @@ unofficial Android flow is not Google-approved. If Google blocks it, stop.
   HTTPS origin/path; no secret URL query/fragment displayed or logged.
   At the user's request there is no warning banner. The visible remember checkbox
   names the powerful, encrypted master token; explanation is under **Security details**.
-  A compact email/consent form expands into the browser only after Continue.
+  A compact consent form expands into the browser only after Continue. Email
+  entry is confined to Google's page, with no duplicate app email field.
 - Exact `accounts.google.com` top-level navigation allowlist and separate restricted
   authentication/static-resource allowlist. No arbitrary third-party frames,
   executable data URLs, popups, downloads or certificate-error overrides.
@@ -105,11 +106,25 @@ after accepting terms. The installed build recorded no completed bearer exchange
 Its old generic message did not preserve the underlying reason, so the actual
 account failure is not retrospectively identified.
 
-One concrete app bug was found: the desktop always passed a blank email into
-the master exchange, although the gpsoauth protocol example supplies the account
-email. The compact form now requires that email and snapshots it before starting
-the worker; a response for a different account is rejected. The underlying
-transport refuses missing/invalid emails before network access.
+The blank Email request field was initially suspected from the gpsoauth wrapper
+example, but it was not established as the cause of the user's failure. A local
+email-entry workaround was removed at the user's request. The initial exchange
+now omits Email and requires a valid identity in Google's authenticated response
+before minting a bearer or saving a credential. There is no form scraping,
+URL/local-data inference or account fallback. This mode remains unverified with
+a real account and fails closed if Google does not return identity.
+
+The next manual attempt's safe diagnostics confirmed a loaded Google page,
+captured sign-in cookie and attempted token exchange, followed by a response
+parsing failure, with no recorded timeout. Background Ping/XHR destinations were
+blocked, but no sign-in frame/navigation was recorded as blocked. The response
+body was not recorded, so its exact content cannot be retrospectively identified.
+
+The parser had rejected unused repeated/punctuated metadata and informational
+lines. It now consumes only Token/Auth/Email/Error, ignores unrelated extensions
+and accepts identical repeats. Conflicting credential fields, invalid tokens,
+HTML/JSON, encoding errors and oversized replies still fail closed. Only a fixed
+response-format label and HTTP status reach diagnostics, never field values.
 
 The browser is no longer stopped at token capture, avoiding interruption of
 Google's still-active terms navigation. Exchange/page-load watchdogs keep the
@@ -117,8 +132,15 @@ failure cancellable. An isolated synthetic hand-off over a real anonymous Google
 page passed with a responsive GUI and clean page/profile/application shutdown;
 its fake sync engine sends no credentials or auth API requests. This is not a
 successful account login or proof that Google's real exchange will succeed.
-This revision passed **531 offline tests**, one anonymous page/cancel probe and
+The earlier revision passed **531 offline tests**, one anonymous page/cancel probe and
 two consecutive synthetic hand-off probes, all with clean application shutdown.
+
+The current revision passed **548 offline tests**. Synthetic token hand-off still
+finishes with a responsive GUI and closes page/profile, but a separate explicit
+QApplication teardown hang was reproduced; it is not resolved. Worker-result
+delivery now uses a GUI-consumed queue, and live Google cookies are no longer
+cleared mid-navigation, but neither change is claimed to fix that shutdown hang.
+The cancel-only probe has exited normally. The freeze investigation remains open.
 
 A credential-free empty-form POST reached the fixed Google auth endpoint with
 verified TLS and returned HTTP 403. This establishes reachability only, not the

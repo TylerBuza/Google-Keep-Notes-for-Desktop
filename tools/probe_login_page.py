@@ -18,10 +18,10 @@ class SyntheticSync:
     is_authenticated = False
     last_auth_failure = None
 
-    def exchange_oauth_for_master(self, email, token):
-        assert email == "synthetic@example.test" and token == "oauth2_4/synthetic-test-only"
+    def exchange_oauth_for_master(self, token):
+        assert token == "oauth2_4/synthetic-test-only"
         time.sleep(0.1)  # Synthetic worker latency, not a wait for an external job.
-        return {"Email": email, "Token": "synthetic-master", "AndroidId": "synthetic-device"}
+        return {"Email": "synthetic@example.test", "Token": "synthetic-master", "AndroidId": "synthetic-device"}
 
     def login(self, email, **kwargs):
         assert email == "synthetic@example.test" and kwargs["master_token"] == "synthetic-master"
@@ -57,11 +57,13 @@ def main():
         done = False
         result = {}
         ticks = []
-        heartbeat = QTimer()
+        heartbeat = QTimer(app)
         heartbeat.setInterval(10)
         heartbeat.timeout.connect(lambda: ticks.append(True))
 
         def close_dialog(result_code):
+            heartbeat.stop()
+            heartbeat.deleteLater()
             result["synthetic_handoff_completed"] = bool(simulated and dialog.signed_in)
             result["gui_heartbeat_during_handoff"] = bool(ticks) if simulated else None
             result["blocked_requests"] = dialog._interceptor.blocked_requests()
@@ -96,7 +98,6 @@ def main():
         QTimer.singleShot(15000, lambda: finish(False))
         dialog.show()
         if simulated:
-            dialog._account_email.setText("synthetic@example.test")
             dialog._risk_consent.setChecked(True)
             dialog._begin_signin()
         else:
@@ -105,16 +106,19 @@ def main():
             dialog.resize(560, 820)
             dialog._login_started = True
             dialog._browser.setUrl(QUrl(EMBEDDED_SETUP_URL))
+        # Match the real controller: sign-in runs a nested modal event loop.
+        QTimer.singleShot(0, dialog.exec)
         app.exec()
-        heartbeat.stop()
         import shiboken6
         result["page_closed_cleanly"] = not shiboken6.isValid(page)
         result["profile_closed_cleanly"] = not shiboken6.isValid(profile)
         print(json.dumps(result, indent=2), flush=True)
         shiboken6.delete(app)
+        result["application_closed_cleanly"] = not shiboken6.isValid(app)
         print("Anonymous application shutdown completed.", flush=True)
         faulthandler.cancel_dump_traceback_later()
-        required = ["anonymous_https_page_loaded", "page_closed_cleanly", "profile_closed_cleanly"]
+        required = ["anonymous_https_page_loaded", "page_closed_cleanly", "profile_closed_cleanly",
+                    "application_closed_cleanly"]
         if simulated:
             required += ["synthetic_handoff_completed", "gui_heartbeat_during_handoff"]
         return 0 if all(result.get(key) for key in required) else 1

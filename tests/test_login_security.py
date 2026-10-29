@@ -94,6 +94,7 @@ def test_login_checkbox_is_the_only_confirmation_and_browser_expands_after_conti
         assert "Remember on this PC" in dialog._risk_consent.text()
         assert "powerful master token, encrypted" in dialog._risk_consent.text()
         assert not hasattr(dialog, "_warning")
+        assert not hasattr(dialog, "_account_email")
         assert "45" not in dialog._retention_details.text()
         assert "mal" + "ware" not in dialog._retention_details.text()
         dialog.show()
@@ -113,15 +114,10 @@ def test_login_checkbox_is_the_only_confirmation_and_browser_expands_after_conti
         confirm.assert_not_called()
         dialog._risk_consent.setChecked(True)
         dialog._begin_signin()
-        navigate.assert_not_called()
-        dialog._account_email.setText("test@example.test")
-        dialog._begin_signin()
         navigate.assert_called_once_with(QUrl("https://accounts.google.com/EmbeddedSetup"))
         confirm.assert_not_called()
         assert dialog._remember_login is True
         assert dialog._risk_consent.isEnabled() is False
-        assert dialog._account_email.isEnabled() is False
-        assert dialog._exchange_email == "test@example.test"
         assert not dialog._browser.isHidden()
         assert dialog.height() > compact_height + 250
         assert dialog._continue_btn.isHidden()
@@ -148,7 +144,7 @@ def test_cancel_after_token_exchange_still_signs_out():
                               _cancelled=threading.Event(), signed_in=True,
                               _keep_sync=MagicMock(is_authenticated=True), _captured_token="dummy",
                               _save_login_diagnostics=MagicMock(), _exchange_timer=MagicMock(),
-                              _page_load_timer=MagicMock())
+                              _page_load_timer=MagicMock(), _worker_result_timer=MagicMock())
     LoginDialog._cleanup_signin(dialog, 0)  # Rejected, even though exchange finished.
     assert dialog._cancelled.is_set()
     assert dialog._captured_token is None
@@ -249,7 +245,6 @@ def test_background_blocks_do_not_replace_page_status_with_a_red_error(qapp, mon
     dialog = LoginDialog()
     try:
         dialog._risk_consent.setChecked(True)
-        dialog._account_email.setText("test@example.test")
         dialog._begin_signin()
         dialog._on_background_request_blocked()
         assert dialog.status_label.isHidden()
@@ -272,7 +267,6 @@ def test_login_diagnostics_contain_only_safe_categories_and_no_token_values(qapp
     dialog = LoginDialog()
     try:
         dialog._risk_consent.setChecked(True)
-        dialog._account_email.setText("test@example.test")
         dialog._begin_signin()
         dialog._captured_token = "dummy-secret"
         dialog._email = "private@example.test"
@@ -306,7 +300,7 @@ def test_exchange_timeout_remains_cancellable_and_prevents_late_login(qapp):
         shiboken6.delete(dialog)
 
 
-def test_token_handoff_uses_entered_email_without_aborting_google_terms_navigation(qapp, monkeypatch):
+def test_token_handoff_needs_no_duplicate_email_and_does_not_abort_google_terms_navigation(qapp, monkeypatch):
     from app_controller import LoginDialog
     from PySide6.QtWebEngineWidgets import QWebEngineView
     monkeypatch.setattr(QWebEngineView, "setUrl", MagicMock())
@@ -315,13 +309,12 @@ def test_token_handoff_uses_entered_email_without_aborting_google_terms_navigati
     monkeypatch.setattr("app_controller.threading.Thread", thread)
     dialog = LoginDialog()
     try:
-        dialog._account_email.setText("test@example.test")
         dialog._risk_consent.setChecked(True)
         dialog._begin_signin()
         stop = MagicMock()
         monkeypatch.setattr(dialog._browser, "stop", stop)
         dialog._on_token_found("oauth2_4/dummy")
-        assert thread.call_args.kwargs["args"] == ("test@example.test", "oauth2_4/dummy")
+        assert thread.call_args.kwargs["args"] == ("oauth2_4/dummy",)
         worker.start.assert_called_once()
         stop.assert_not_called()
         assert dialog._exchange_timer.isActive()
@@ -332,13 +325,68 @@ def test_token_handoff_uses_entered_email_without_aborting_google_terms_navigati
         shiboken6.delete(dialog)
 
 
-def test_returned_google_identity_must_match_the_supplied_email():
+@pytest.mark.parametrize("email", [None, "", "not-an-email", "private@example.test\x00"])
+def test_google_identity_must_be_present_and_valid_before_login(email):
     import threading
     from app_controller import LoginDialog
     engine = MagicMock()
-    engine.exchange_oauth_for_master.return_value = {"Email": "different@example.test", "Token": "dummy"}
-    dialog = SimpleNamespace(_cancelled=threading.Event(), _keep_sync=engine, _signals=MagicMock())
-    LoginDialog._exchange_worker(dialog, "expected@example.test", "oauth2_4/dummy")
+    engine.exchange_oauth_for_master.return_value = {"Email": email, "Token": "dummy"}
+    dialog = SimpleNamespace(_cancelled=threading.Event(), _keep_sync=engine, _queue_login_result=MagicMock())
+    LoginDialog._exchange_worker(dialog, "oauth2_4/dummy")
     engine.login.assert_not_called()
-    assert dialog._signals.result.emit.call_args.args[0] is False
-    assert "different account" in dialog._signals.result.emit.call_args.args[1]
+    assert dialog._queue_login_result.call_args.args[0] is False
+    assert "account identity" in dialog._queue_login_result.call_args.args[1]
+
+
+def test_login_uses_only_the_identity_returned_by_google():
+    import threading
+    from app_controller import LoginDialog
+    engine = MagicMock()
+    engine.exchange_oauth_for_master.return_value = {"Email": "google-identity@example.test", "Token": "dummy"}
+    engine.login.return_value = True
+    dialog = SimpleNamespace(_cancelled=threading.Event(), _keep_sync=engine,
+                             _queue_login_result=MagicMock(), _remember_login=True)
+    LoginDialog._exchange_worker(dialog, "oauth2_4/dummy")
+    engine.exchange_oauth_for_master.assert_called_once_with("oauth2_4/dummy")
+    assert engine.login.call_args.args == ("google-identity@example.test",)
+    assert dialog._queue_login_result.call_args.args == (True, "google-identity@example.test")
+
+
+def test_worker_results_reach_widgets_only_when_consumed_on_the_gui_thread(qapp):
+    import threading
+    from app_controller import LoginDialog
+    dialog = LoginDialog()
+    try:
+        assert dialog._signals.parent() is dialog
+        worker = threading.Thread(target=dialog._queue_login_result, args=(False, "Sign-in did not finish."))
+        worker.start()
+        worker.join(timeout=1)
+        assert not worker.is_alive()
+        assert dialog.status_label.text() == ""
+        dialog._consume_login_result()
+        assert dialog.status_label.text() == "Sign-in did not finish."
+        assert dialog._browser.isEnabled()
+        dialog._cancelled.set()
+        dialog._queue_login_result(True, "private@example.test")
+        assert dialog._login_results.empty()
+    finally:
+        dialog.reject()
+        import shiboken6
+        shiboken6.delete(dialog)
+
+
+def test_result_does_not_clear_google_cookies_during_live_terms_navigation(qapp, monkeypatch):
+    from app_controller import LoginDialog
+    dialog = LoginDialog()
+    store = MagicMock()
+    monkeypatch.setattr(dialog._profile, "cookieStore", lambda: store)
+    try:
+        dialog._browser.setEnabled(False)
+        dialog._on_login_result(False, "Sign-in did not finish.")
+        assert dialog._browser.isEnabled()
+        store.deleteAllCookies.assert_not_called()
+        dialog.reject()
+        store.deleteAllCookies.assert_called_once()
+    finally:
+        import shiboken6
+        shiboken6.delete(dialog)
