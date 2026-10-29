@@ -7,10 +7,8 @@ app_controller / note_window can use either implementation behind a
 feature flag.
 
 Key differences from v1:
-- Auth via keep_protocol.auth (gpsoauth + keyring). The same master token
-  v1 stores in DPAPI is reused — we just hand it to keep_protocol's
-  Credentials object. New logins write to keyring AND save_token() so
-  v1 still works if the user flips the flag back.
+- Auth via gpsoauth. Desktop credentials use per-user Windows DPAPI;
+  existing CLI credentials can be imported from Windows Credential Manager.
 - fetch_notes() decodes serializedChunks → StyledDoc → HTML. Notes get
   KeepNote.nested_doc and KeepNote.html populated; KeepNote.text is the
   plain-text projection.
@@ -28,14 +26,14 @@ import difflib
 import logging
 import threading
 from typing import Optional
-from uuid import getnode as get_mac
+import secrets
 
 import gpsoauth
 
 from config import KEEP_COLORS, load_token, save_token
 from keep_sync import KeepNote   # reuse the dataclass
 from keep_protocol.auth import (
-    Credentials, AuthError, _store_credentials, load_credentials, _get_active_email,
+    Credentials, AuthError, load_credentials,
 )
 from keep_protocol.client import KeepClient, KeepError
 from keep_protocol.models import Note as ServerNote
@@ -165,17 +163,17 @@ class KeepSyncV2:
               password: Optional[str] = None) -> bool:
         """Authenticate. Same signature as v1.
 
-        - master_token: if given, store it (in keyring AND v1's DPAPI
-          token file) and use it.
+        - master_token: verify it, then store with per-user Windows DPAPI.
         - password: NOT supported in v2 (Google killed password auth).
         - neither: try loading from keyring, then v1's stored token.
         """
+        self._authenticated = False
         if password and not master_token:
             log.error("v2 sync does not support password login")
             return False
 
         if not master_token:
-            master_token = load_token()
+            master_token = load_token(email)
             if not master_token:
                 # Try keyring (in case the user previously logged in via
                 # keep_protocol's own CLI).
@@ -188,13 +186,7 @@ class KeepSyncV2:
         if not master_token:
             return False
 
-        # Store in both stores so either v1 or v2 can pick it up later.
-        android_id = f"{get_mac():x}"
-        try:
-            _store_credentials(email, master_token, android_id)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("could not write keyring creds: %s", exc)
-        save_token(master_token)
+        android_id = secrets.token_hex(8)
 
         # Build a Credentials and verify by minting a bearer.
         creds = Credentials(email=email, master_token=master_token,
@@ -204,6 +196,14 @@ class KeepSyncV2:
         except AuthError as exc:
             log.error("v2 bearer mint failed: %s", exc)
             self._authenticated = False
+            return False
+
+        # Persist only verified credentials, protected with per-user DPAPI.
+        # Storage failure aborts login; there is no plaintext fallback.
+        try:
+            save_token(master_token, email)
+        except Exception:
+            log.error("Secure credential storage failed; login aborted")
             return False
 
         self._client = KeepClient(creds)
@@ -217,15 +217,15 @@ class KeepSyncV2:
         """Same shape as v1 — exchange an EmbeddedSetup oauth_token for a
         master token via gpsoauth. Returns the gpsoauth response dict,
         or None on failure."""
-        android_id = f"{get_mac():x}"
+        android_id = secrets.token_hex(8)
         try:
             resp = gpsoauth.exchange_token(email, oauth_token, android_id)
             if not resp.get("Token"):
-                log.error("Token exchange returned no Token: %s", resp)
+                log.error("Google rejected the token exchange")
                 return None
             return resp
         except Exception as exc:  # noqa: BLE001
-            log.error("Token exchange failed: %s", exc)
+            log.error("Token exchange failed (%s)", type(exc).__name__)
             return None
 
     # ----- read ---------------------------------------------------------
@@ -289,7 +289,7 @@ class KeepSyncV2:
                 self._client.sync(full=do_full)
             except KeepError as exc:
                 log.error("v2 sync failed: %s", exc)
-                return []
+                raise
             self._first_fetch_done = True
             # A note can come back from an incremental delta with its
             # revision bumped but serializedChunks NOT re-echoed (Keep
@@ -485,9 +485,9 @@ class KeepSyncV2:
                             if had_chunks:
                                 log.warning(
                                     "v2 fetch: decode produced empty doc for %s but "
-                                    "indexableText=%r; falling back to plain text "
+                                    "indexableText length=%d; falling back to plain text "
                                     "(chunks=%d, sct_id=%s, rev=%s)",
-                                    note.id[:8], note.indexable_text[:80],
+                                    note.id[:8], len(note.indexable_text),
                                     len(note.serialized_chunks or []),
                                     note.sct_id, note.nested_revision,
                                 )
@@ -656,6 +656,10 @@ class KeepSyncV2:
             )
             return True
 
+    def _before_push(self, keep_note: KeepNote, server: Optional[ServerNote]) -> bool:
+        """Policy hook for hardened clients, called after the authoritative pull."""
+        return True
+
     def push_note(self, keep_note: KeepNote) -> bool:
         if not self._authenticated or not self._client:
             return False
@@ -688,7 +692,8 @@ class KeepSyncV2:
             try:
                 self._client.sync(full=True)
             except KeepError as exc:
-                log.warning("pre-push resync failed: %s (proceeding anyway)", exc)
+                log.warning("pre-push resync failed; write refused: %s", exc)
+                return False
             for n in self._client.notes.values():
                 self._server_notes[n.id] = n
             # A full resync usually returns complete chunks for every
@@ -727,13 +732,17 @@ class KeepSyncV2:
                         self._server_notes[n.id] = n
                 except KeepError as exc:
                     log.warning("second pre-push resync failed: %s", exc)
+                    return False
                 if self._client.is_snapshot_stale(keep_note.id):
                     log.warning(
                         "v2 push: %s snapshot still stale after retry; "
-                        "proceeding anyway", keep_note.id[:8],
+                        "write refused", keep_note.id[:8],
                     )
+                    return False
 
             server = self._server_notes.get(keep_note.id)
+            if not self._before_push(keep_note, server):
+                return False
             if server is None:
                 # The note exists locally but Keep doesn't know about it.
                 # Two common causes:
@@ -893,6 +902,7 @@ class KeepSyncV2:
                     server = self._server_notes.get(keep_note.id, server)
                 except KeepError as exc:
                     log.warning("pre-push full resync failed: %s", exc)
+                    return False
 
             # 3-way merge if both sides moved since our last fetched base.
             base_text = self._base_text.get(keep_note.id, "")
@@ -1272,6 +1282,7 @@ class KeepSyncV2:
                     "v2 push: metadata follow-up failed for %s: %s",
                     keep_note.id[:8], exc,
                 )
+                return False
 
             # Refresh cache entry + base text from what we just wrote.
             # Force a full sync so the server's authoritative post-write

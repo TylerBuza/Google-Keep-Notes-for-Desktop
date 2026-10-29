@@ -76,13 +76,13 @@ class KeepSync:
 
         Prefers a stored master token for subsequent logins.
         """
-        stored_token = load_token()
+        stored_token = load_token(email)
         try:
             if master_token:
                 self.keep.authenticate(email, master_token)
                 self._authenticated = True
                 # Persist so we don't need browser login again
-                save_token(master_token)
+                save_token(master_token, email)
             elif stored_token:
                 self.keep.authenticate(email, stored_token)
                 self._authenticated = True
@@ -91,7 +91,7 @@ class KeepSync:
                 self._authenticated = True
                 token = self.keep.getMasterToken()
                 if token:
-                    save_token(token)
+                    save_token(token, email)
             else:
                 return False
         except Exception as exc:
@@ -103,7 +103,7 @@ class KeepSync:
         if self._authenticated and not stored_token:
             token = self.keep.getMasterToken()
             if token:
-                save_token(token)
+                save_token(token, email)
 
         log.info("Authenticated with Google Keep as %s", email)
         return True
@@ -119,11 +119,11 @@ class KeepSync:
         try:
             resp = gpsoauth.exchange_token(email, oauth_token, android_id)
             if not resp.get("Token"):
-                log.error("Token exchange returned no Token: %s", resp)
+                log.error("Google rejected the token exchange")
                 return None
             return resp
         except Exception as exc:
-            log.error("Token exchange failed: %s", exc)
+            log.error("Token exchange failed (%s)", type(exc).__name__)
             return None
 
     def fetch_notes(

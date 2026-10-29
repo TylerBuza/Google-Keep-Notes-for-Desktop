@@ -24,12 +24,10 @@ CLI:
 from __future__ import annotations
 
 import argparse
-import json
 import secrets
 import sys
 import time
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Optional
 
 import gpsoauth
@@ -60,38 +58,44 @@ class AuthError(RuntimeError):
 @dataclass
 class Credentials:
     email: str
-    master_token: str
+    master_token: str = field(repr=False)
     android_id: str
 
     def mint_bearer(self) -> str:
         """Trade the master token for a short-lived OAuth bearer (~1h TTL)."""
-        resp = gpsoauth.perform_oauth(
-            self.email,
-            self.master_token,
-            self.android_id,
-            _KEEP_SERVICE,
-            _KEEP_APP,
-            _KEEP_CLIENT_SIG,
-        )
-        token = resp.get("Auth")
-        if not token:
-            raise AuthError(f"perform_oauth returned no Auth: {resp!r}")
+        try:
+            resp = gpsoauth.perform_oauth(
+                self.email, self.master_token, self.android_id,
+                _KEEP_SERVICE, _KEEP_APP, _KEEP_CLIENT_SIG,
+            )
+        except Exception:
+            raise AuthError("Google authentication failed; sign in again.") from None
+        token = resp.get("Auth") if isinstance(resp, dict) else None
+        if not isinstance(token, str) or not token:
+            raise AuthError("Google did not issue a Keep access token; sign in again.")
         return token
 
 
 # ---------------------------------------------------------------- keyring I/O
 
+def _keyring():
+    # Never accept a third-party plaintext/fallback keyring backend.
+    if sys.platform != "win32":
+        raise AuthError("This build requires Windows Credential Manager.")
+    from keyring.backends.Windows import WinVaultKeyring
+    return WinVaultKeyring()
+
 def _get_active_email() -> Optional[str]:
-    return keyring.get_password(_KR_SERVICE, _KR_ACCOUNT_EMAIL)
+    return _keyring().get_password(_KR_SERVICE, _KR_ACCOUNT_EMAIL)
 
 
 def _set_active_email(email: str) -> None:
-    keyring.set_password(_KR_SERVICE, _KR_ACCOUNT_EMAIL, email)
+    _keyring().set_password(_KR_SERVICE, _KR_ACCOUNT_EMAIL, email)
 
 
 def _store_credentials(email: str, master_token: str, android_id: str) -> None:
-    keyring.set_password(_KR_SERVICE, _KR_PREFIX_MASTER + email, master_token)
-    keyring.set_password(_KR_SERVICE, _KR_PREFIX_ANDROID + email, android_id)
+    _keyring().set_password(_KR_SERVICE, _KR_PREFIX_MASTER + email, master_token)
+    _keyring().set_password(_KR_SERVICE, _KR_PREFIX_ANDROID + email, android_id)
     _set_active_email(email)
 
 
@@ -102,8 +106,8 @@ def load_credentials(email: Optional[str] = None) -> Credentials:
         email = _get_active_email()
     if not email:
         raise AuthError("no account is logged in — run: python -m keep_protocol.auth login")
-    master = keyring.get_password(_KR_SERVICE, _KR_PREFIX_MASTER + email)
-    android = keyring.get_password(_KR_SERVICE, _KR_PREFIX_ANDROID + email)
+    master = _keyring().get_password(_KR_SERVICE, _KR_PREFIX_MASTER + email)
+    android = _keyring().get_password(_KR_SERVICE, _KR_PREFIX_ANDROID + email)
     if not master or not android:
         raise AuthError(f"no stored master token for {email!r} — run: python -m keep_protocol.auth login")
     return Credentials(email=email, master_token=master, android_id=android)
@@ -116,12 +120,12 @@ def clear_credentials(email: Optional[str] = None) -> None:
         return
     for key in (_KR_PREFIX_MASTER + email, _KR_PREFIX_ANDROID + email):
         try:
-            keyring.delete_password(_KR_SERVICE, key)
+            _keyring().delete_password(_KR_SERVICE, key)
         except keyring.errors.PasswordDeleteError:
             pass
     if _get_active_email() == email:
         try:
-            keyring.delete_password(_KR_SERVICE, _KR_ACCOUNT_EMAIL)
+            _keyring().delete_password(_KR_SERVICE, _KR_ACCOUNT_EMAIL)
         except keyring.errors.PasswordDeleteError:
             pass
 
@@ -138,9 +142,8 @@ def _interactive_browser_signin() -> tuple[str, str]:
     """Open Chromium at EmbeddedSetup; wait until oauth_token cookie appears.
     Returns (email, oauth_token).
 
-    We use the Playwright that's already installed for the capture harness.
-    Persistent profile lives at ./browser_data/ (gitignored, same dir the
-    capture tool uses — sessions are independent so this is fine).
+    This optional CLI uses an ephemeral Playwright context. The desktop app
+    uses an off-the-record Qt profile instead. Neither reuses a login profile.
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -150,9 +153,6 @@ def _interactive_browser_signin() -> tuple[str, str]:
             "    pip install -r requirements.txt\n"
             "    python -m playwright install chromium"
         ) from e
-
-    profile = Path(__file__).resolve().parent.parent / "browser_data"
-    profile.mkdir(exist_ok=True)
 
     print("[auth] opening sign-in window...")
     print("[auth] sign in normally (password / 2FA / passkey all work)")
@@ -177,13 +177,12 @@ def _interactive_browser_signin() -> tuple[str, str]:
     ]
 
     with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(
-            user_data_dir=str(profile),
+        browser = p.chromium.launch(
             headless=False,
-            viewport=None,                    # let --window-size win
             ignore_default_args=["--enable-automation"],
             args=chromium_args,
         )
+        ctx = browser.new_context()
         # --app=URL already navigated; reuse that page.
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         # Defensive: if the app-mode page somehow didn't navigate, force it.
@@ -225,6 +224,7 @@ def _interactive_browser_signin() -> tuple[str, str]:
 
         try:
             ctx.close()
+            browser.close()
         except Exception:
             pass
 
@@ -248,11 +248,17 @@ def login() -> Credentials:
     email, oauth_token = _interactive_browser_signin()
     android_id = _new_android_id()
     print(f"[auth] exchanging oauth_token for master token (account: {email})...")
-    resp = gpsoauth.exchange_token(email, oauth_token, android_id)
-    master = resp.get("Token")
+    try:
+        resp = gpsoauth.exchange_token(email, oauth_token, android_id)
+    except Exception:
+        raise AuthError("Google token exchange failed.") from None
+    master = resp.get("Token") if isinstance(resp, dict) else None
     if not master:
-        raise AuthError(f"exchange_token returned no Token: {resp!r}")
-    _store_credentials(email, master, android_id)
+        raise AuthError("Google did not issue a master token.")
+    try:
+        _store_credentials(email, master, android_id)
+    except Exception:
+        raise AuthError("Windows Credential Manager could not save the login.") from None
     print(f"[auth] success — credentials stored in keyring for {email}")
     return load_credentials(email)
 
@@ -282,7 +288,8 @@ def _cmd_logout(args) -> int:
     if not email:
         print("[auth] nothing to log out of")
         return 0
-    clear_credentials(email)
+    from config import clear_token
+    clear_token(email)
     print(f"[auth] cleared credentials for {email}")
     return 0
 

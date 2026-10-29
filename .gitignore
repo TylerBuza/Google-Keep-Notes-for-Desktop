@@ -41,3 +41,12 @@ config.json
 # Local-only dev archive (keep-protocol reverse-engineering project)
 archive/
 
+# Private state and development artifacts must never be committed.
+.openchamber/
+.pytest_cache/
+browser_data/
+recovery/
+*.log
+.env
+.env.*
+

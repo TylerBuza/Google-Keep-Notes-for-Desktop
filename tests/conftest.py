@@ -8,6 +8,12 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
+
+# Set before importing config/app modules. Tests must never touch real notes
+# or credentials, even if the user already has KeepDesktop installed.
+_TEST_DATA = tempfile.TemporaryDirectory(prefix="keepdesktop-tests-")
+os.environ["APPDATA"] = _TEST_DATA.name
 
 # Add the repo root to sys.path so the bare-package imports resolve
 # whether pytest is invoked from the repo root or `tests/`.
@@ -19,6 +25,14 @@ if _REPO_ROOT not in sys.path:
 # up a QTextDocument which needs QGuiApplication to be alive). Provide
 # one session-scoped fixture so each test doesn't spin its own.
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def no_live_network(monkeypatch):
+    import requests
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Live network access is forbidden in tests")
+    monkeypatch.setattr(requests.sessions.Session, "request", forbidden)
 
 
 @pytest.fixture(scope="session")

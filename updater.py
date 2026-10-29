@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import Qt, QObject, Signal, Slot, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from config import APP_NAME, APP_VERSION, GITHUB_REPO
+from config import APP_NAME, APP_VERSION, GITHUB_REPO, AUTO_UPDATE_ENABLED
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +62,8 @@ def is_newer(remote: str, local: str) -> bool:
 
 def fetch_latest_release(timeout: float = 10.0) -> ReleaseInfo | None:
     """Hit the GitHub API and return the latest release, or None."""
+    if not AUTO_UPDATE_ENABLED:
+        return None
     req = urllib.request.Request(
         RELEASES_API,
         headers={
@@ -113,6 +115,8 @@ def fetch_latest_release(timeout: float = 10.0) -> ReleaseInfo | None:
 
 def download_installer(url: str, progress_cb=None) -> str | None:
     """Stream-download the installer to a temp file. Returns the path."""
+    if not AUTO_UPDATE_ENABLED:
+        return None
     suffix = os.path.basename(url) or "KeepDesktop-Setup.exe"
     fd, dest = tempfile.mkstemp(prefix="KeepDesktopUpdate-", suffix="-" + suffix)
     os.close(fd)
@@ -158,6 +162,8 @@ def run_installer_and_quit(installer_path: str) -> bool:
     /VERYSILENT) so the user sees the progress bar; we deliberately do
     not pass /SUPPRESSMSGBOXES so failures are visible.
     """
+    if not AUTO_UPDATE_ENABLED:
+        return False
     if not os.path.isfile(installer_path):
         return False
 

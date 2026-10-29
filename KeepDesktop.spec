@@ -37,6 +37,7 @@ a = Analysis(
         'PySide6.QtNetwork',
         'gkeepapi',
         'gpsoauth',
+        'keyring.backends.Windows',
     ],
     hookspath=[],
     hooksconfig={},

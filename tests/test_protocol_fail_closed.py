@@ -1,0 +1,108 @@
+from copy import deepcopy
+from unittest.mock import MagicMock
+
+import pytest
+import requests
+
+from keep_protocol.client import KeepClient, KeepError, CHANGES_URL, CHANGES_URL_WRITE
+from keep_protocol.models import Note
+
+
+def client():
+    creds = MagicMock()
+    creds.mint_bearer.return_value = "dummy-bearer"
+    instance = KeepClient(creds)
+    instance.notes["1.original"] = Note.from_server({"id": "1.original", "type": "NOTE", "text": "original"})
+    instance.target_version = "before"
+    return instance
+
+
+@pytest.mark.parametrize("data", [None, [], {}, {"nodes": None, "toVersion": "v"},
+    {"nodes": [], "toVersion": 123}, {"nodes": [None], "toVersion": "v"},
+    {"nodes": [{"id": 123}], "toVersion": "v"},
+    {"nodes": [], "toVersion": "v", "truncated": "false"}])
+def test_changed_schema_cannot_replace_cache_or_advance_cursor(data):
+    instance = client()
+    original = deepcopy(instance.notes)
+    instance._post = MagicMock(return_value=data)
+    with pytest.raises(KeepError):
+        instance.sync(full=True)
+    assert instance.notes == original
+    assert instance.target_version == "before"
+
+
+def test_second_page_failure_rolls_back_whole_pull():
+    instance = client()
+    original = deepcopy(instance.notes)
+    instance._post = MagicMock(side_effect=[
+        {"nodes": [{"id": "2.partial", "type": "NOTE", "text": "partial"}],
+         "toVersion": "middle", "truncated": True}, KeepError("offline")])
+    with pytest.raises(KeepError):
+        instance.sync(full=True)
+    assert instance.notes == original
+    assert instance.target_version == "before"
+
+
+def test_repeating_pagination_is_bounded():
+    instance = client()
+    instance._post = MagicMock(return_value={"nodes": [], "toVersion": "same", "truncated": True})
+    with pytest.raises(KeepError):
+        instance.sync(full=True)
+    assert instance._post.call_count == 2
+    assert instance.target_version == "before"
+
+
+def test_repeating_force_resync_is_bounded():
+    instance = client()
+    instance._post = MagicMock(return_value={"forceFullResync": True})
+    with pytest.raises(KeepError):
+        instance.sync(full=True)
+    assert instance._post.call_count == 2
+
+
+@pytest.mark.parametrize("failure", [requests.Timeout("dummy-secret"), requests.ConnectionError("dummy-secret")])
+def test_uncertain_write_is_never_automatically_replayed(monkeypatch, failure):
+    post = MagicMock(side_effect=failure)
+    monkeypatch.setattr(requests, "post", post)
+    with pytest.raises(KeepError) as error:
+        client()._post(CHANGES_URL_WRITE, {"nodes": []})
+    assert post.call_count == 1
+    assert "dummy-secret" not in str(error.value)
+
+
+@pytest.mark.parametrize("status", [302, 403, 429, 500, 503])
+def test_http_errors_do_not_retry_or_log_response_body(monkeypatch, status):
+    response = MagicMock(status_code=status, text="dummy-secret-response")
+    post = MagicMock(return_value=response)
+    monkeypatch.setattr(requests, "post", post)
+    with pytest.raises(KeepError) as error:
+        client()._post(CHANGES_URL_WRITE, {"nodes": []})
+    assert post.call_count == 1
+    assert post.call_args.kwargs["allow_redirects"] is False
+    assert "dummy-secret" not in str(error.value)
+
+
+def test_only_definite_401_rejection_retries_once(monkeypatch):
+    success = MagicMock(status_code=200)
+    success.json.return_value = {"nodes": [], "toVersion": "ok"}
+    post = MagicMock(side_effect=[MagicMock(status_code=401), success])
+    monkeypatch.setattr(requests, "post", post)
+    assert client()._post(CHANGES_URL, {}) == success.json.return_value
+    assert post.call_count == 2
+
+
+@pytest.mark.parametrize("payload", [None, [], {}, {"error": "failure"}, {"nodes": []}])
+def test_missing_write_acknowledgment_is_not_success(monkeypatch, payload):
+    response = MagicMock(status_code=200)
+    response.json.return_value = payload
+    monkeypatch.setattr(requests, "post", MagicMock(return_value=response))
+    with pytest.raises(KeepError):
+        client()._post(CHANGES_URL_WRITE, {"nodes": [{"id": "1.original"}]})
+
+
+def test_untrusted_endpoint_never_receives_a_google_token(monkeypatch):
+    post = MagicMock()
+    monkeypatch.setattr(requests, "post", post)
+    with pytest.raises(KeepError):
+        client()._post("https://evil.test/notes", {})
+    post.assert_not_called()

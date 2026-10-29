@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import copy
 import secrets
 import time
 from typing import Any, Optional
@@ -107,6 +108,8 @@ class KeepClient:
         return self._bearer
 
     def _post(self, url: str, body: dict[str, Any]) -> dict[str, Any]:
+        if url not in (CHANGES_URL, CHANGES_URL_WRITE):
+            raise KeepError("Refusing to send a Google token to an untrusted endpoint.")
         headers = {
             "Authorization": f"OAuth {self._get_bearer()}",
             "Content-Type": "application/json",
@@ -120,15 +123,35 @@ class KeepClient:
                 "Chrome/147.0.0.0 Safari/537.36"
             ),
         }
-        resp = requests.post(url, headers=headers, json=body, timeout=30)
-        if resp.status_code == 401:
-            # Bearer expired mid-call; force a re-mint and retry once.
-            self._bearer = None
-            headers["Authorization"] = f"OAuth {self._get_bearer()}"
-            resp = requests.post(url, headers=headers, json=body, timeout=30)
-        if resp.status_code != 200:
-            raise KeepError(f"{url} -> {resp.status_code}: {resp.text[:500]}")
-        return resp.json()
+        try:
+            resp = requests.post(url, headers=headers, json=body, timeout=(10, 30),
+                                 allow_redirects=False)
+            if resp.status_code == 401:
+                # Only a definite rejection is safe to retry. Never replay
+                # writes after timeouts, 429, 5xx or malformed responses.
+                self._bearer = None
+                headers["Authorization"] = f"OAuth {self._get_bearer()}"
+                resp = requests.post(url, headers=headers, json=body, timeout=(10, 30),
+                                     allow_redirects=False)
+            if resp.status_code != 200:
+                raise KeepError(f"Keep request rejected (HTTP {resp.status_code}); sync paused.")
+            data = resp.json()
+        except (requests.RequestException, ValueError):
+            raise KeepError("Keep request failed or returned invalid JSON; result may be uncertain.") from None
+        if not isinstance(data, dict) or data.get("error"):
+            raise KeepError("Keep returned an unsupported/error response; sync paused.")
+        if url == CHANGES_URL_WRITE:
+            nodes = data.get("nodes")
+            if (not isinstance(nodes, list) or data.get("truncated")
+                    or data.get("forceFullResync")
+                    or any(not isinstance(node, dict) or not isinstance(node.get("id"), str)
+                           for node in nodes)):
+                raise KeepError("Keep did not acknowledge the write with a supported response.")
+            sent = {node["id"] for node in body.get("nodes", []) if node.get("id")}
+            echoed = {node.get("id") for node in nodes}
+            if not sent.issubset(echoed):
+                raise KeepError("Keep did not confirm every written note; result is uncertain.")
+        return data
 
     def _request_header(self) -> dict[str, Any]:
         return {
@@ -218,6 +241,20 @@ class KeepClient:
                 pass
 
     def sync(self, full: bool = False) -> dict[str, Any]:
+        # A partial/malformed paginated pull must not advance the cursor or
+        # become the basis for a destructive write. Roll back as one unit.
+        saved = copy.deepcopy((self.notes, self.target_version,
+                               self._stale_snapshot_ids, self._client_revision))
+        try:
+            return self._sync_pages(full)
+        except Exception as exc:
+            (self.notes, self.target_version, self._stale_snapshot_ids,
+             self._client_revision) = saved
+            if isinstance(exc, KeepError):
+                raise
+            raise KeepError("Keep sync data could not be validated; cache unchanged.") from None
+
+    def _sync_pages(self, full: bool = False) -> dict[str, Any]:
         """Pull changes from the server. Returns the raw response of
         the LAST page (the one that closed out the loop). Updates
         ``self.notes`` and ``self.target_version``.
@@ -246,7 +283,12 @@ class KeepClient:
         last_data: dict[str, Any] = {}
 
         first_page = True
+        page_count = 0
+        seen_cursors = set()
         while True:
+            page_count += 1
+            if page_count > 100:
+                raise KeepError("Keep pagination exceeded safety limit; cache unchanged.")
             body = {
                 "clientTimestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
                 "nodes": [],
@@ -263,7 +305,12 @@ class KeepClient:
             data = self._post(CHANGES_URL, body)
             last_data = data
 
+            if not isinstance(data, dict):
+                raise KeepError("Unsupported Keep sync response.")
+
             if data.get("forceFullResync"):
+                if forced_resync:
+                    raise KeepError("Keep repeatedly requested a full resync; cache unchanged.")
                 # Server says our cursor is too stale or otherwise
                 # invalid. Restart the loop in full mode from a clean
                 # slate; the next iteration will send no cursor.
@@ -273,6 +320,21 @@ class KeepClient:
                 full = True
                 first_page = True
                 continue
+
+            if (not isinstance(data.get("nodes"), list)
+                    or not isinstance(data.get("toVersion"), str)
+                    or not data["toVersion"]
+                    or not isinstance(data.get("truncated", False), bool)):
+                raise KeepError("Keep sync schema changed; cache unchanged and writes refused.")
+            for node in data["nodes"]:
+                if (not isinstance(node, dict) or not isinstance(node.get("id"), str)
+                        or not node["id"] or not isinstance(node.get("type", "NOTE"), str)):
+                    raise KeepError("Keep returned malformed note data; cache unchanged.")
+            if data.get("truncated"):
+                cursor = data["toVersion"]
+                if cursor in seen_cursors or cursor == body.get("targetVersion"):
+                    raise KeepError("Keep pagination stopped advancing; cache unchanged.")
+                seen_cursors.add(cursor)
 
             self.target_version = data.get("toVersion") or self.target_version
 
