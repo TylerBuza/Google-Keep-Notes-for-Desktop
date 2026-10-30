@@ -37,7 +37,7 @@ def main():
     parser.add_argument("--two-way", action="store_true", help="Show fictional sync-on UI; never connects")
     parser.add_argument("--card", action="store_true", help="Capture a fictional card to compare typography")
     parser.add_argument("--floating", action="store_true", help="Capture a fictional desktop note")
-    parser.add_argument("--view", choices=("notes", "archive", "label"), default="notes")
+    parser.add_argument("--view", choices=("notes", "archive", "label", "settings"), default="notes")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="keep-dashboard-") as data:
         os.environ["APPDATA"] = data
@@ -49,7 +49,7 @@ def main():
 
         app = QApplication([])
         samples = fictional_notes()
-        if args.view != "notes":
+        if args.view in ("archive", "label"):
             samples.extend([
                 KeepNote(id="demo-archive-1", title="Last season's ideas", labels=["Ideas"],
                          archived=True, color_hex="#D7AEFB", text="Good thoughts, kept for another day."),
@@ -61,7 +61,9 @@ def main():
         dashboard.set_sync_state(True, args.two_way)
         dashboard.resize(args.width, args.height)
         dashboard.show()
-        if args.view != "notes":
+        if args.view == "settings":
+            dashboard._show_settings()
+        elif args.view != "notes":
             dashboard._set_view("archive" if args.view == "archive" else "label:Ideas")
         target = dashboard
         editor = None

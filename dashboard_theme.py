@@ -29,6 +29,7 @@ QPushButton { background: transparent; border: none; border-radius: 5px;
 QPushButton:hover { background: rgba(255,255,255,0.07); }
 QPushButton:focus { border: 1px solid #9aa0a6; }
 QPushButton:disabled { color: #6e7074; }
+QCheckBox:disabled { color: #6e7074; }
 QPushButton[iconButton="true"] { border-radius: 18px; padding: 6px; }
 QPushButton[nav="true"] { border-radius: 0; border-top-right-radius: 24px;
                          border-bottom-right-radius: 24px; padding: 12px 22px; }

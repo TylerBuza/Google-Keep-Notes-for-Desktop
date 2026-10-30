@@ -3,12 +3,12 @@
 from copy import deepcopy
 import uuid
 
-from PySide6.QtCore import Qt, Signal, QSize, QTimer
+from PySide6.QtCore import Qt, Signal, QSize, QTimer, QSignalBlocker
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog, QWidget, QFrame, QLabel, QLineEdit, QPushButton, QScrollArea,
     QVBoxLayout, QHBoxLayout, QStackedWidget, QSizePolicy, QMenu, QMessageBox,
-    QComboBox, QTextEdit,
+    QComboBox, QTextEdit, QCheckBox,
 )
 
 from config import KEEP_COLORS
@@ -428,9 +428,16 @@ class NoteManagerDialog(QDialog):
     reorder_requested = Signal(str, str)
     font_scale_changed = Signal(float)
     sync_requested = Signal()
+    preference_changed = Signal(str, bool)
+    settings_opened = Signal()
+    account_action_requested = Signal()
+    recovery_requested = Signal()
+    conflicts_requested = Signal()
+    about_requested = Signal()
     _FONT_SCALE_PRESETS = [0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
 
-    def __init__(self, notes, visibility, font_scale=1.0, parent=None, *, cloud_labels=None):
+    def __init__(self, notes, visibility, font_scale=1.0, parent=None, *, cloud_labels=None,
+                 preferences=None):
         super().__init__(parent)
         self.setObjectName("dashboard")
         self.setFont(crisp_font(self.font()))
@@ -448,6 +455,12 @@ class NoteManagerDialog(QDialog):
         self._label_buttons = {}
         self._label_names = []
         self._cloud_labels = list(cloud_labels or [])
+        self._preferences = {
+            "autostart": False, "show_in_taskbar": False, "group_in_taskbar": True,
+            "cloud_writes_enabled": True, "font_scale": font_scale,
+        }
+        self._preferences.update({key: value for key, value in (preferences or {}).items()
+                                  if key in self._preferences})
         self._editor = None
         self._editor_overlay = None
         root = QVBoxLayout(self)
@@ -499,6 +512,9 @@ class NoteManagerDialog(QDialog):
         self._layout_button.clicked.connect(self._toggle_layout)
         bar.addWidget(self._layout_button)
         settings = icon_button("settings", "Settings")
+        settings.setObjectName("openSettings")
+        settings.setCheckable(True)
+        self._settings_button = settings
         settings.clicked.connect(self._show_settings)
         bar.addWidget(settings)
         root.addWidget(header)
@@ -599,7 +615,8 @@ class NoteManagerDialog(QDialog):
         self._status = plain_label()
         self._status.setStyleSheet(f"color: {MUTED}; font-size: 11px; padding: 8px 24px;")
         root.addWidget(self._status)
-        self.set_sync_state(False, False)
+        self.set_preferences(self._preferences)
+        self.set_sync_state(False, False, self._preferences["cloud_writes_enabled"])
         QShortcut(QKeySequence("Ctrl+F"), self, activated=self._search_edit.setFocus)
         QShortcut(QKeySequence("Ctrl+N"), self, activated=self.note_create_requested.emit)
         self.refresh(notes, visibility)
@@ -624,17 +641,57 @@ class NoteManagerDialog(QDialog):
 
     def _build_settings_page(self, font_scale):
         page = QWidget()
-        layout = QVBoxLayout(page)
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setObjectName("settingsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._settings_scroll = scroll
+        host = QWidget()
+        host.setObjectName("settingsHost")
+        host.setStyleSheet(f"QWidget#settingsHost {{ background: {BACKGROUND}; }}")
+        layout = QVBoxLayout(host)
         layout.setContentsMargins(36, 32, 36, 24)
+        layout.setSpacing(12)
         heading = plain_label("Settings")
         heading.setStyleSheet("font-family: 'Google Sans'; font-size: 22px;")
         layout.addWidget(heading)
-        layout.addSpacing(20)
+        def hint(text):
+            label = plain_label(text)
+            label.setStyleSheet(f"color: {MUTED}; font-size: 13px;")
+            label.setWordWrap(True)
+            layout.addWidget(label)
+
+        def section(text):
+            layout.addSpacing(12)
+            label = self._section_label(text)
+            layout.addWidget(label)
+
+        self._setting_checks = {}
+        def checkbox(key, text, description):
+            control = QCheckBox(text)
+            control.setObjectName("setting_" + key)
+            control.setAccessibleName(text)
+            control.setCursor(Qt.CursorShape.PointingHandCursor)
+            control.setStyleSheet("QCheckBox { spacing: 12px; padding: 4px 0; }"
+                                 "QCheckBox::indicator { width: 18px; height: 18px; }")
+            control.toggled.connect(lambda checked, name=key: self.preference_changed.emit(name, checked))
+            self._setting_checks[key] = control
+            layout.addWidget(control)
+            hint(description)
+
+        hint("Changes apply immediately and are remembered on this PC.")
+        section("WINDOWS")
+        checkbox("autostart", "Start with Windows",
+                 "Launch Keep Desktop when you sign in to Windows. Uses your Startup-folder shortcut.")
+        checkbox("show_in_taskbar", "Show floating notes in the taskbar",
+                 "Give floating notes taskbar buttons. This does not change Keep pins or desktop visibility.")
+        checkbox("group_in_taskbar", "Group notes in the taskbar",
+                 "Available when floating notes are shown in the taskbar.")
+        section("APPEARANCE")
         layout.addWidget(plain_label("Floating note text size"))
-        hint = plain_label("Applies immediately to floating desktop notes. The dashboard uses Keep’s dark theme.")
-        hint.setStyleSheet(f"color: {MUTED};")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+        hint("Applies immediately to floating desktop notes. The dashboard keeps its native dark theme.")
         self._font_scale_combo = _NoWheelComboBox()
         closest = min(self._FONT_SCALE_PRESETS, key=lambda p: abs(p - font_scale))
         for preset in self._FONT_SCALE_PRESETS:
@@ -644,20 +701,51 @@ class NoteManagerDialog(QDialog):
             lambda index: self.font_scale_changed.emit(float(self._font_scale_combo.itemData(index))))
         self._font_scale_combo.setMaximumWidth(180)
         layout.addWidget(self._font_scale_combo)
-        layout.addSpacing(24)
-        info = plain_label("Keep pin: move a note into the Pinned section.\n\n"
-                           "Desktop pin: open a floating note above other windows. "
-                           "Hide it without changing its Keep pin.\n\n"
-                           "Archive browsing and existing cloud labels are read-only. "
-                           "Manage archives, labels and Trash in the official Keep app.\n\n"
-                           "Two-way sync and account controls remain in the tray menu.")
-        info.setWordWrap(True)
-        info.setStyleSheet(f"color: {MUTED};")
-        layout.addWidget(info)
+        section("SYNC & ACCOUNT")
+        checkbox("cloud_writes_enabled", "Two-way Google Keep sync",
+                 "Upload queued local edits after a verified read. Conflicts and uncertain writes still stop for review.")
+        self._settings_sync_status = plain_label()
+        self._settings_sync_status.setWordWrap(True)
+        self._settings_sync_status.setStyleSheet(f"color: {MUTED}; font-size: 13px;")
+        layout.addWidget(self._settings_sync_status)
+        self._settings_sync_button = QPushButton("Sync now")
+        self._settings_sync_button.clicked.connect(self.sync_requested.emit)
+        self._settings_account_button = QPushButton("Sign in to Google Keep…")
+        self._settings_account_button.clicked.connect(self.account_action_requested.emit)
+        for button in (self._settings_sync_button, self._settings_account_button):
+            button.setAutoDefault(False)
+            layout.addWidget(button)
+        section("TOOLS")
+        for text, signal in (("Resolve sync conflicts…", self.conflicts_requested),
+                             ("View saved recovery copies…", self.recovery_requested),
+                             ("About KeepDesktop…", self.about_requested)):
+            button = QPushButton(text)
+            button.setAutoDefault(False)
+            button.clicked.connect(signal.emit)
+            layout.addWidget(button)
+        hint("Closing a floating note hides it. Use tray → Quit to exit Keep Desktop.")
         layout.addStretch()
+        scroll.setWidget(host)
+        outer.addWidget(scroll)
         return page
 
-    def set_sync_state(self, authenticated, writes_enabled, writes_requested=False):
+    def set_preferences(self, preferences):
+        """Render controller truth without echoing settings back as user edits."""
+        self._preferences.update({key: value for key, value in preferences.items()
+                                  if key in self._preferences})
+        for key, control in self._setting_checks.items():
+            with QSignalBlocker(control):
+                control.setChecked(self._preferences[key] is True)
+        self._setting_checks["group_in_taskbar"].setEnabled(
+            self._preferences["show_in_taskbar"] is True)
+        closest = min(self._FONT_SCALE_PRESETS,
+                      key=lambda preset: abs(preset - self._preferences["font_scale"]))
+        with QSignalBlocker(self._font_scale_combo):
+            self._font_scale_combo.setCurrentIndex(self._FONT_SCALE_PRESETS.index(closest))
+
+    def set_sync_state(self, authenticated, writes_enabled, writes_requested=None):
+        if writes_requested is None:
+            writes_requested = writes_enabled
         self._authenticated = authenticated
         self._writes_enabled = writes_enabled
         if authenticated and writes_enabled:
@@ -670,6 +758,10 @@ class NoteManagerDialog(QDialog):
         else:
             text = "Two-way sync on · text, checklists, Keep pins and colors sync with Google Keep"
         self._status.setText(text)
+        self._settings_sync_status.setText(text)
+        self._settings_sync_button.setEnabled(authenticated)
+        self._settings_account_button.setText("Sign out…" if authenticated else "Sign in to Google Keep…")
+        self.set_preferences({"cloud_writes_enabled": writes_requested})
         if self._editor is not None:
             self._editor.set_sync_state(authenticated, writes_enabled)
 
@@ -678,7 +770,18 @@ class NoteManagerDialog(QDialog):
         self._pin_status.show()
 
     def _show_settings(self):
+        if self._pages.currentIndex() != 1:
+            self.settings_opened.emit()
         self._pages.setCurrentIndex(1 - self._pages.currentIndex())
+        self._update_navigation_selection()
+
+    def _update_navigation_selection(self):
+        settings_shown = self._pages.currentIndex() == 1
+        self._settings_button.setChecked(settings_shown)
+        for key, button in self._nav_buttons.items():
+            button.setChecked(not settings_shown and key == self._view)
+        for name, button in self._label_buttons.items():
+            button.setChecked(not settings_shown and self._view == "label:" + name)
 
     def _return_to_notes(self):
         editor = self._editor
@@ -784,10 +887,7 @@ class NoteManagerDialog(QDialog):
                 self._label_buttons[name] = button
         if self._view.startswith("label:") and self._view[6:] not in names:
             self._view = "notes"
-        for key, button in self._nav_buttons.items():
-            button.setChecked(key == self._view)
-        for name, button in self._label_buttons.items():
-            button.setChecked(self._view == "label:" + name)
+        self._update_navigation_selection()
         self._label_host.setVisible(bool(names))
         self._label_scroll.setVisible(bool(names))
         self._label_host.ensurePolished()

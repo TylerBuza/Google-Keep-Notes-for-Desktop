@@ -99,6 +99,15 @@ No existing local notes are deleted to make room for an import.
 
 ## Native dashboard
 
+The native Settings page shares the tray's existing preference handlers. Opening
+it only refreshes local settings; it does not start sign-in, enable uploads, or
+change Windows startup. Startup follows the actual Startup-folder shortcut,
+including failed changes and changes made outside the app. Dashboard/tray
+controls refresh without echoing toggles as new user actions. Sync resume keeps
+the existing confirmation and fresh-read/uncertain-write safeguards; account,
+conflict, recovery and About actions run only on explicit clicks. Startup/taskbar
+preferences never change cloud note content or Keep pins.
+
 The Keep-style dashboard is native Qt, not an authenticated website or a script
 bridge. Its control icons are locally drawn vectors. Original OFL-licensed
 Google Sans/Roboto fonts are bundled, hashed and registered only for this process;

@@ -8,7 +8,7 @@ import threading
 from queue import Empty, SimpleQueue
 from functools import partial
 
-from PySide6.QtCore import Qt, QTimer, Slot, Signal, QObject, QUrl
+from PySide6.QtCore import Qt, QTimer, Slot, Signal, QObject, QUrl, QSignalBlocker
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QFont, QDesktopServices
 from PySide6.QtNetwork import QNetworkCookie
 from PySide6.QtWidgets import (
@@ -983,14 +983,14 @@ class AppController(QObject):
         self._group_action.toggled.connect(self._toggle_taskbar_grouping)
         menu.addAction(self._group_action)
 
-        autostart_action = QAction("Start with Windows", menu)
-        autostart_action.setCheckable(True)
+        self._autostart_action = QAction("Start with Windows", menu)
+        self._autostart_action.setCheckable(True)
         # Read the live disk state so the menu always reflects whether
         # the Startup-folder shortcut actually exists, even if the
         # installer or another app touched it behind our back.
-        autostart_action.setChecked(is_autostart_enabled())
-        autostart_action.toggled.connect(self._toggle_autostart)
-        menu.addAction(autostart_action)
+        self._autostart_action.setChecked(is_autostart_enabled())
+        self._autostart_action.toggled.connect(self._toggle_autostart)
+        menu.addAction(self._autostart_action)
 
         menu.addSeparator()
 
@@ -1005,6 +1005,68 @@ class AppController(QObject):
         menu.addAction(quit_action)
 
         self.tray.setContextMenu(menu)
+        menu.aboutToShow.connect(self._refresh_settings)
+
+    def _settings_preferences(self):
+        # Send only supported preferences to the dashboard, never account data.
+        return {"autostart": self.config.get("autostart", False) is True,
+                "show_in_taskbar": self.config.get("show_in_taskbar", False) is True,
+                "group_in_taskbar": self.config.get("group_in_taskbar", True) is True,
+                "cloud_writes_enabled": self.config.get("cloud_writes_enabled", True) is True,
+                "font_scale": self.config.get("font_scale", 1.0)}
+
+    def _update_settings_controls(self, *, refresh_autostart=False):
+        if refresh_autostart:
+            actual = is_autostart_enabled()
+            if self.config.get("autostart", False) != actual:
+                self.config["autostart"] = actual
+                try:
+                    save_config(self.config)
+                except Exception:
+                    log.warning("Could not save refreshed Windows startup preference")
+        preferences = self._settings_preferences()
+        for name, key in (("_autostart_action", "autostart"),
+                          ("_taskbar_action", "show_in_taskbar"),
+                          ("_group_action", "group_in_taskbar"),
+                          ("_writes_action", "cloud_writes_enabled")):
+            action = getattr(self, name, None)
+            if action is not None:
+                with QSignalBlocker(action):
+                    action.setChecked(preferences[key])
+        group = getattr(self, "_group_action", None)
+        if group is not None:
+            group.setEnabled(preferences["show_in_taskbar"])
+        dialog = getattr(self, "_manager_dlg", None)
+        if dialog is not None:
+            dialog.set_preferences(preferences)
+
+    def _refresh_settings(self):
+        self._update_settings_controls(refresh_autostart=True)
+        self._update_dashboard_sync_state()
+
+    @Slot(str, bool)
+    def _on_settings_preference_changed(self, key, enabled):
+        if type(enabled) is not bool:
+            return
+        handlers = {"autostart": self._toggle_autostart,
+                    "show_in_taskbar": self._toggle_taskbar,
+                    "group_in_taskbar": self._toggle_taskbar_grouping,
+                    "cloud_writes_enabled": self._toggle_cloud_writes}
+        handler = handlers.get(key)
+        if handler is not None:
+            handler(enabled)
+
+    def _save_display_preference(self, key, value):
+        updated = {**self.config, key: value}
+        try:
+            save_config(updated)
+        except Exception:
+            self._update_settings_controls()
+            QMessageBox.warning(getattr(self, "_manager_dlg", None), "KeepDesktop — settings",
+                                "Could not save this setting. The previous setting has been kept.")
+            return False
+        self.config[key] = value
+        return True
 
     def _update_login_action_text(self):
         if self.sync.is_authenticated:
@@ -1015,6 +1077,7 @@ class AppController(QObject):
         self._update_dashboard_sync_state()
 
     def _update_dashboard_sync_state(self):
+        self._update_settings_controls()
         dlg = getattr(self, "_manager_dlg", None)
         if dlg is not None:
             dlg.set_sync_state(self.sync.is_authenticated,
@@ -1044,6 +1107,7 @@ class AppController(QObject):
                 self._writes_action.blockSignals(True)
                 self._writes_action.setChecked(self.config.get("cloud_writes_enabled", True))
                 self._writes_action.blockSignals(False)
+                self._update_dashboard_sync_state()
                 return
         self.sync.set_writes_enabled(enabled, acknowledge_pause=enabled)
         self.config["cloud_writes_enabled"] = enabled
@@ -1581,6 +1645,7 @@ class AppController(QObject):
             self._notes, self._visibility,
             font_scale=self.config.get("font_scale", 1.0),
             cloud_labels=getattr(self, "_cloud_labels", []),
+            preferences=self._settings_preferences(),
         )
         dlg.setModal(False)
         dlg.note_deleted.connect(self._on_note_deleted)
@@ -1594,6 +1659,12 @@ class AppController(QObject):
         dlg.sync_requested.connect(self._manual_sync)
         dlg.reorder_requested.connect(self._reorder_note)
         dlg.font_scale_changed.connect(self._on_font_scale_changed)
+        dlg.preference_changed.connect(self._on_settings_preference_changed)
+        dlg.settings_opened.connect(self._refresh_settings)
+        dlg.account_action_requested.connect(self._on_login_action)
+        dlg.recovery_requested.connect(self._show_recovery_copies)
+        dlg.conflicts_requested.connect(self._resolve_sync_conflicts)
+        dlg.about_requested.connect(self._show_about)
         dlg.accepted.connect(lambda: self._on_manager_accepted(dlg))
         dlg.rejected.connect(lambda: self._on_manager_closed())
         dlg.finished.connect(lambda _r: self._on_manager_closed())
@@ -1757,11 +1828,12 @@ class AppController(QObject):
         self._manager_dlg = None
 
     def _on_font_scale_changed(self, scale: float):
-        self.config["font_scale"] = scale
-        save_config(self.config)
+        if not self._save_display_preference("font_scale", scale):
+            return
         note_window.set_font_scale(scale)
         for win in self.windows.values():
             win.refresh_font_scale()
+        self._update_settings_controls()
 
     def _refresh_manager_if_open(self):
         dlg = getattr(self, "_manager_dlg", None)
@@ -1791,9 +1863,9 @@ class AppController(QObject):
     # ── Taskbar toggle ─────────────────────────────────────────────────
 
     def _toggle_taskbar(self, show):
+        if not self._save_display_preference("show_in_taskbar", show):
+            return
         self._show_in_taskbar = show
-        self.config["show_in_taskbar"] = show
-        save_config(self.config)
         for win in self.windows.values():
             win.set_taskbar_visible(show)
         # Apply grouping immediately for the new visibility state.
@@ -1801,11 +1873,13 @@ class AppController(QObject):
         # Group toggle is only meaningful when notes are in the taskbar.
         if hasattr(self, "_group_action"):
             self._group_action.setEnabled(show)
+        self._update_settings_controls()
 
     def _toggle_taskbar_grouping(self, group: bool):
-        self.config["group_in_taskbar"] = group
-        save_config(self.config)
+        if not self._save_display_preference("group_in_taskbar", group):
+            return
         self._apply_taskbar_grouping()
+        self._update_settings_controls()
 
     def _grouping_app_id_for(self, note_id: str) -> str:
         from config import APP_NAME, APP_VERSION
@@ -1946,6 +2020,7 @@ class AppController(QObject):
             from config import POSITIONS_FILE
             if os.path.exists(POSITIONS_FILE):
                 os.remove(POSITIONS_FILE)
+            self._refresh_manager_if_open()
 
         self._update_login_action_text()
 
@@ -2666,7 +2741,17 @@ class AppController(QObject):
         # about what Windows will do at login.
         actual = is_autostart_enabled()
         self.config["autostart"] = actual
-        save_config(self.config)
+        message = None
+        try:
+            save_config(self.config)
+        except Exception:
+            message = "Windows startup was checked, but the app could not save its preferences."
+        self._update_settings_controls()
+        if not ok or actual != enabled:
+            message = ("Could not change Start with Windows. The setting now shows the actual "
+                       "Startup-folder shortcut state.")
+        if message:
+            QMessageBox.warning(getattr(self, "_manager_dlg", None), "KeepDesktop — settings", message)
 
     def _on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
