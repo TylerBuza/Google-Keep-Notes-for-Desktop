@@ -16,6 +16,22 @@ Pause it in Settings or the tray. Conflicts and uncertain writes still stop for
 review. Keep independent backups; do not disable antivirus or dismiss a block.
 The separate WebEngine shutdown hang remains under investigation.
 
+### Exact 2.3.3 build
+
+- Source: `4707655d8d780fc6286a0e34577f58df58305959`.
+- [Installer build 41096847461](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/actions/runs/41096847461).
+- [Isolated binary verification 41097912023](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/actions/runs/41097912023).
+- Installer SHA256: `79b2d7448228fc55de684a8626e7b813f917e7001466e02470043fe48d9a0b27`.
+- Packaged application SHA256: `7d3d4ef6d7f495f1570878af9f8f7388e87252531f647c01777b25b4f39b5800`.
+
+The source passed 819 offline tests and 167 headed UI tests. The build checked
+53 Python packages, the frozen authentication-module policy, seven bundled
+fonts/licenses, and ten Keep icon sizes. The exact installed binary passed an
+isolated DPAPI-cache smoke test without personal notes or credentials. These
+checks do not establish that every queued cloud edit succeeded or certify the
+unofficial protocol's future behavior. The attached reports identify the bytes
+and checks actually performed; no old binary analysis is relabeled as current.
+
 ## Security notice for 2.3.0
 
 **The published 2.3.0 binaries have unresolved antivirus detections. These have

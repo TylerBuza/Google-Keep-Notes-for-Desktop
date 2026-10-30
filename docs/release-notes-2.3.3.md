@@ -12,7 +12,6 @@
 Download **Google-Keep-Notes-for-Desktop-Setup-2.3.3.exe** below. Save your edits and
 use **tray → Quit** before upgrading. Two-way sync includes queued local edits;
 you can pause it in Settings. Checksums and verification reports are attached.
-Fresh multi-engine binary analysis is currently unavailable.
 
 Still built on LukeCGG's original sticky-note/pinning foundation, significantly
 expanded into the native Keep-style experience. Original credit and AGPL-3.0 retained.
