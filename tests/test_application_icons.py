@@ -58,7 +58,18 @@ def test_windows_ico_contains_correct_logo_at_small_taskbar_and_large_sizes(qapp
         expected = source.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
                                  Qt.TransformationMode.SmoothTransformation).toImage()
         assert actual.size() == expected.size()
-        assert actual.convertToFormat(QImage.Format.Format_RGBA8888) == expected.convertToFormat(QImage.Format.Format_RGBA8888)
+        # The tracked ICO can be generated on a different CPU from the runner.
+        # Qt's SIMD resampling rounds a few edge pixels differently. Compare
+        # premultiplied channels (the visible contribution) with a tiny bound,
+        # not unpremultiplied RGB where near-transparent colors amplify it.
+        actual_pm = actual.convertToFormat(QImage.Format.Format_RGBA8888_Premultiplied)
+        expected_pm = expected.convertToFormat(QImage.Format.Format_RGBA8888_Premultiplied)
+        actual_pixels = bytes(actual_pm.constBits())
+        expected_pixels = bytes(expected_pm.constBits())
+        deltas = [abs(a - b) for a, b in zip(actual_pixels, expected_pixels)]
+        assert len(actual_pixels) == len(expected_pixels)
+        assert max(deltas) <= 2, f"Wrong logo pixels at {size}px"
+        assert sum(deltas) / len(deltas) <= 0.25, f"Wrong logo artwork at {size}px"
         offset += length
         sizes.append(size)
     assert sizes == [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
