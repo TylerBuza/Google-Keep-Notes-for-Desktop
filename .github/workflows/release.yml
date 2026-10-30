@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Installer version (for example 2.3.0)'
+        description: 'Installer version (for example 2.3.1)'
         required: true
-        default: '2.3.0'
+        default: '2.3.1'
 
 permissions:
   contents: read   # Publication is manual, after exact-byte antivirus review.
@@ -95,9 +95,9 @@ jobs:
 
       - name: Generate icon.ico
         shell: pwsh
-        # Use the real Windows Qt platform plugin (not "offscreen") so the
-        # font system has access to GDI fonts like Segoe UI. The offscreen
-        # plugin ships with no fonts and renders text as empty glyphs.
+        env:
+          QT_QPA_PLATFORM: offscreen
+        # The embedded PNG needs no system fonts, browser, or remote resources.
         run: python tools/generate_icon.py
 
       - name: Build with PyInstaller

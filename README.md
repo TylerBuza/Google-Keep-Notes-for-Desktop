@@ -24,6 +24,7 @@
   note colors, and pinned sections—without embedding the Keep website.
 - **Web-style editing on desktop:** card-colored in-app editors, click-outside
   saving, Google Sans/Roboto typography, and content-sized layouts.
+- **Matching Keep icons:** the tray, windows, taskbar, and EXE use the same logo.
 - **Floating, pinnable notes:** text and checklists on your desktop, remembered
   placement, resizing, local always-on-top, and hide without deleting.
 - **Guarded Google Keep sync:** offline edits, explicitly enabled two-way writes,

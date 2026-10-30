@@ -1,4 +1,4 @@
-"""Bundled, unmodified Google Keep artwork for the dashboard header and tray.
+"""Bundled Google Keep artwork for the header, tray, windows and Windows icons.
 
 Source: https://www.gstatic.com/images/branding/product/2x/keep_2020q4_48dp.png
 Retrieved 2026-10-29; SHA256:

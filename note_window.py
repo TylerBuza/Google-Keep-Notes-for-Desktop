@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 from keep_protocol.nested_model import u16_len
 from native_resources import LocalNoteDocument
 from ui_typography import BODY_FAMILY, crisp_font
+from app_icon import make_icon
 from content_sizing import body_height, chrome_height
 from dashboard_theme import icon as interface_icon, card_color, ACCENT, BORDER, FOREGROUND, MUTED
 from config import (
@@ -2203,19 +2204,9 @@ class NoteWindow(QWidget):
         self._formatting_expanded = False
         self.setFont(crisp_font(self.font()))
 
-        # Explicit per-window icon. QApplication's windowIcon usually
-        # cascades, but on Windows the taskbar reads the per-window icon
-        # directly — setting it here guarantees the K shows up there too.
-        # We also tint the icon to match the note colour so each pinned
-        # note in the taskbar is visually distinct.
-        try:
-            from app_icon import make_icon as _make_icon
-            self.setWindowIcon(_make_icon(color_hex))
-        except Exception:  # noqa: BLE001
-            from PySide6.QtWidgets import QApplication
-            inst = QApplication.instance()
-            if inst is not None and not inst.windowIcon().isNull():
-                self.setWindowIcon(inst.windowIcon())
+        # Windows reads the per-window icon directly for individual taskbar
+        # buttons. Use the same un-tinted artwork as the tray and dashboard.
+        self.setWindowIcon(make_icon())
 
         # Frameless window; Tool flag hides from taskbar
         flags = Qt.WindowType.FramelessWindowHint
@@ -2422,12 +2413,6 @@ class NoteWindow(QWidget):
         self.checklist_editor.set_dark(self._dark_mode)
         self._apply_char_count_style()
         self._style_actions()
-        # Recolour the per-window taskbar icon to match the note.
-        try:
-            from app_icon import make_icon as _make_icon
-            self.setWindowIcon(_make_icon(bg))
-        except Exception:  # noqa: BLE001
-            pass
 
     def _on_text_changed(self):
         self._update_char_count()
