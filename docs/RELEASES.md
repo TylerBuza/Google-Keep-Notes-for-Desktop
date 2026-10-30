@@ -1,5 +1,21 @@
 # Releases and verification
 
+## Security notice for 2.3.3
+
+**Unofficial, experimental, and unsigned. No clean-binary claim is made.**
+
+Fresh multi-engine antivirus analysis is not currently available for 2.3.3.
+Dependency audits, frozen-module/font checks, tests and an isolated binary smoke
+test are separate checks, not substitutes for malware analysis. Review the
+exact-file verification reports attached to the release before installing.
+Missing analysis must be reported as missing, never as a pass. Earlier 2.3.0
+findings below remain unresolved and are not carried over to these new bytes.
+
+Two-way sync now starts after a verified read, including queued local edits.
+Pause it in Settings or the tray. Conflicts and uncertain writes still stop for
+review. Keep independent backups; do not disable antivirus or dismiss a block.
+The separate WebEngine shutdown hang remains under investigation.
+
 ## Security notice for 2.3.0
 
 **The published 2.3.0 binaries have unresolved antivirus detections. These have
@@ -56,7 +72,7 @@ tag. It creates artifacts only, with read-only repository permissions; it never
 automatically makes binaries into a published GitHub release.
 
 ```powershell
-gh workflow run release.yml --repo TylerBuza/Google-Keep-Notes-for-Desktop --ref main -f version=2.3.0
+gh workflow run release.yml --repo TylerBuza/Google-Keep-Notes-for-Desktop --ref main -f version=2.3.3
 ```
 
 For a local build, use Python 3.13 on Windows and Inno Setup 6. CI is preferred
@@ -74,7 +90,7 @@ $env:QT_QPA_PLATFORM = 'windows'
 .\.venv\Scripts\python.exe -m PyInstaller KeepDesktop.spec
 .\.venv\Scripts\python.exe tools/verify_frozen_security.py build/KeepDesktop/Analysis-00.toc | Out-File Output/security-frozen-inventory.json -Encoding utf8
 .\.venv\Scripts\python.exe tools/verify_frozen_fonts.py dist/KeepDesktop | Out-File Output/security-fonts.json -Encoding utf8
-ISCC.exe /DMyAppVersion=2.3.0 /DMyAppNumericVersion=2.3.0 installer.iss
+ISCC.exe /DMyAppVersion=2.3.3 /DMyAppNumericVersion=2.3.3 installer.iss
 ```
 
 CI also stamps `config.APP_VERSION`. For a local release, stamp the same version

@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Installer version (for example 2.3.2)'
+        description: 'Installer version (for example 2.3.3)'
         required: true
-        default: '2.3.2'
+        default: '2.3.3'
 
 permissions:
   contents: read   # Publication is manual, after exact-byte antivirus review.

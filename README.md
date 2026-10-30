@@ -52,8 +52,9 @@ fictional, not a personal account capture.*
 
 **Windows 10/11 x64.** Download the setup EXE and its `.sha256` file from the
 [latest release](https://github.com/TylerBuza/Google-Keep-Notes-for-Desktop/releases/latest).
-Unresolved antivirus findings are documented in the [verification notes](docs/RELEASES.md#security-notice-for-230); this is not a
-clean-binary claim. Let sync finish, save edits, and **tray → Quit** before upgrading.
+Read the [current verification notice](docs/RELEASES.md#security-notice-for-233) before installing.
+Earlier 2.3.0 antivirus findings remain unresolved; they are not results for a new build.
+Let sync finish, save edits, and **tray → Quit** before upgrading.
 
 Start offline, or use the tray to sign in through Google's visible HTTPS page.
 Remembered sign-in stores a powerful token protected for your Windows user.
