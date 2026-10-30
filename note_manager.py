@@ -8,7 +8,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog, QWidget, QFrame, QLabel, QLineEdit, QPushButton, QScrollArea,
     QVBoxLayout, QHBoxLayout, QStackedWidget, QSizePolicy, QMenu, QMessageBox,
-    QComboBox,
+    QComboBox, QTextEdit,
 )
 
 from config import KEEP_COLORS
@@ -112,8 +112,8 @@ class NoteEditorDialog(QDialog):
         self.error.hide()
         layout.addWidget(self.error)
         footer = QHBoxLayout()
-        hint = plain_label("Click outside or Close to save locally · cloud writes require opt-in"
-                           if embedded else "Save stores locally · cloud writes require separate opt-in")
+        hint = plain_label("Click outside or Close to save locally · two-way sync is on by default"
+                           if embedded else "Save stores locally · two-way sync follows your tray setting")
         self._save_hint = hint
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
@@ -313,6 +313,7 @@ class NoteCard(QFrame):
         actions = QHBoxLayout()
         actions.setSpacing(4)
         palette = icon_button("palette", "Change note color", self)
+        self.palette = palette
         palette.clicked.connect(lambda: self.color_requested.emit(
             self.note_id, palette, palette.rect().bottomLeft()))
         actions.addWidget(palette)
@@ -328,6 +329,8 @@ class NoteCard(QFrame):
 
     def update_note(self, note, visible):
         self._desktop = visible
+        for button in (self.pin, self.desktop, self.palette):
+            button.setVisible(not note.archived)
         bg = card_color(note.color_hex)
         self.setStyleSheet(f"QFrame#noteCard {{ background: {bg}; border: 1px solid #5f6368;"
                           "border-radius: 8px; } QFrame#noteCard:hover { border-color: #9aa0a6; }")
@@ -427,7 +430,7 @@ class NoteManagerDialog(QDialog):
     sync_requested = Signal()
     _FONT_SCALE_PRESETS = [0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
 
-    def __init__(self, notes, visibility, font_scale=1.0, parent=None):
+    def __init__(self, notes, visibility, font_scale=1.0, parent=None, *, cloud_labels=None):
         super().__init__(parent)
         self.setObjectName("dashboard")
         self.setFont(crisp_font(self.font()))
@@ -444,6 +447,7 @@ class NoteManagerDialog(QDialog):
         self._list_view = False
         self._label_buttons = {}
         self._label_names = []
+        self._cloud_labels = list(cloud_labels or [])
         self._editor = None
         self._editor_overlay = None
         root = QVBoxLayout(self)
@@ -511,14 +515,27 @@ class NoteManagerDialog(QDialog):
         self._add_nav("notes", "Notes", "notes")
         self._add_nav("desktop", "Desktop pins", "desktop")
         self._label_host = QWidget()
+        self._label_host.setObjectName("labelHost")
+        self._label_host.setStyleSheet(f"QWidget#labelHost {{ background: {BACKGROUND}; }}")
         self._label_layout = QVBoxLayout(self._label_host)
         self._label_layout.setContentsMargins(0, 8, 0, 8)
         self._label_layout.setSpacing(0)
-        self._nav_layout.addWidget(self._label_host)
-        for text, name in (("Archive", "archive"), ("Trash", "trash")):
-            button = self._add_nav(name, text, name)
-            button.setEnabled(False)
-            button.setToolTip("Not available yet — requires additional safe sync support")
+        self._label_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        label_scroll = QScrollArea()
+        label_scroll.setWidgetResizable(True)
+        label_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        label_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        label_scroll.setWidget(self._label_host)
+        label_scroll.viewport().setObjectName("labelViewport")
+        label_scroll.viewport().setStyleSheet(f"QWidget#labelViewport {{ background: {BACKGROUND}; }}")
+        label_scroll.viewport().setAutoFillBackground(False)
+        self._label_scroll = label_scroll
+        self._nav_layout.addWidget(label_scroll, 1)
+        archive = self._add_nav("archive", "Archive", "archive")
+        archive.setToolTip("Cloud archive · read-only; manage archives in the official Keep app")
+        trash = self._add_nav("trash", "Trash", "trash")
+        trash.setEnabled(False)
+        trash.setToolTip("Not available yet — requires additional safe sync support")
         self._nav_layout.addStretch()
         body.addWidget(self._sidebar)
         self._pages = QStackedWidget()
@@ -539,6 +556,7 @@ class NoteManagerDialog(QDialog):
         composer_row = QHBoxLayout()
         composer_row.addStretch()
         composer = QFrame()
+        self._composer = composer
         composer.setObjectName("composer")
         composer.setMaximumWidth(600)
         composer.setStyleSheet("QFrame#composer { border: 1px solid #5f6368; border-radius: 8px; }")
@@ -630,16 +648,16 @@ class NoteManagerDialog(QDialog):
         info = plain_label("Keep pin: move a note into the Pinned section.\n\n"
                            "Desktop pin: open a floating note above other windows. "
                            "Hide it without changing its Keep pin.\n\n"
-                           "Archive, Trash browsing, and label editing are not available yet. "
-                           "Existing labels, when present in the local model, are read-only.\n\n"
-                           "Cloud-write opt-in and account controls remain in the tray menu.")
+                           "Archive browsing and existing cloud labels are read-only. "
+                           "Manage archives, labels and Trash in the official Keep app.\n\n"
+                           "Two-way sync and account controls remain in the tray menu.")
         info.setWordWrap(True)
         info.setStyleSheet(f"color: {MUTED};")
         layout.addWidget(info)
         layout.addStretch()
         return page
 
-    def set_sync_state(self, authenticated, writes_enabled):
+    def set_sync_state(self, authenticated, writes_enabled, writes_requested=False):
         self._authenticated = authenticated
         self._writes_enabled = writes_enabled
         if authenticated and writes_enabled:
@@ -647,7 +665,8 @@ class NoteManagerDialog(QDialog):
         if not authenticated:
             text = "Offline · edits are saved locally"
         elif not writes_enabled:
-            text = "Read-only sync · edits stay local · enable two-way sync in the tray menu to upload"
+            text = ("Two-way sync waiting or safety-paused · edits stay queued locally" if writes_requested else
+                    "Read-only sync · edits stay local · enable two-way sync in the tray menu to upload")
         else:
             text = "Two-way sync on · text, checklists, Keep pins and colors sync with Google Keep"
         self._status.setText(text)
@@ -738,13 +757,17 @@ class NoteManagerDialog(QDialog):
         self._pages.setCurrentIndex(0)
         self.refresh(self._all_notes, self.result_visibility)
 
-    def refresh(self, notes, visibility):
+    def refresh(self, notes, visibility, cloud_labels=None):
         self._all_notes = dict(notes)
+        if cloud_labels is not None:
+            self._cloud_labels = list(cloud_labels)
         # Controller state is authoritative, including closing a floating note
         # outside this dashboard. Filtering must never reset its visibility.
         self.result_visibility = {nid: visibility.get(nid, False) for nid in notes}
         names = sorted({label for note in notes.values() for label in note.labels
-                        if isinstance(label, str) and label})
+                        if isinstance(label, str) and label}
+                       | {label for label in self._cloud_labels if isinstance(label, str) and label},
+                       key=str.casefold)
         if names != self._label_names:
             for button in self._label_buttons.values():
                 self._label_layout.removeWidget(button)
@@ -766,12 +789,16 @@ class NoteManagerDialog(QDialog):
         for name, button in self._label_buttons.items():
             button.setChecked(self._view == "label:" + name)
         self._label_host.setVisible(bool(names))
+        self._label_scroll.setVisible(bool(names))
+        self._label_host.ensurePolished()
+        self._label_scroll.setMaximumHeight(max(1, self._label_host.sizeHint().height()))
         for nid in list(self._cards):
             if nid not in notes:
                 card = self._cards.pop(nid)
                 card.hide()
                 card.deleteLater()
         query = self._search_text.strip().casefold()
+        self._composer.setVisible(self._view != "archive")
         matches = []
         for note in notes.values():
             visible = self.result_visibility[note.id]
@@ -779,9 +806,13 @@ class NoteManagerDialog(QDialog):
                 (note.title + "\n" + note.text + "\n" + "\n".join(
                     label for label in note.labels if isinstance(label, str))).casefold())
             if self._view == "desktop":
-                match = match and visible
+                match = match and visible and not note.archived
+            elif self._view == "archive":
+                match = match and note.archived
             elif self._view.startswith("label:"):
                 match = match and self._view[6:] in note.labels
+            elif not query:
+                match = match and not note.archived
             card = self._cards.get(note.id)
             if match:
                 if card is None:
@@ -799,8 +830,8 @@ class NoteManagerDialog(QDialog):
                 card.hide()
         matches.sort(key=lambda n: (not n.pinned,
             (0, n.local_order) if n.local_order else (1, -int(n.sort_key or 0))))
-        pinned = [self._cards[n.id] for n in matches if n.pinned]
-        others = [self._cards[n.id] for n in matches if not n.pinned]
+        pinned = [self._cards[n.id] for n in matches if n.pinned and not n.archived]
+        others = [self._cards[n.id] for n in matches if not n.pinned or n.archived]
         self._pinned_grid.set_cards(pinned, self._list_view)
         self._others_grid.set_cards(others, self._list_view)
         self._pinned_label.setVisible(bool(pinned))
@@ -809,9 +840,14 @@ class NoteManagerDialog(QDialog):
         self._others_grid.setVisible(bool(others))
         self._empty.setVisible(not matches)
         self._empty.setText("No matching notes" if query else
-            "Pin a note to your desktop to see it here" if self._view == "desktop" else "Notes you add appear here")
+            "Pin a note to your desktop to see it here" if self._view == "desktop" else
+            "Your cloud archive is empty" if self._view == "archive" else
+            "No notes with this label" if self._view.startswith("label:") else "Notes you add appear here")
 
     def _on_desktop_toggle(self, note_id, visible):
+        note = self._all_notes.get(note_id)
+        if note is None or note.archived:
+            return
         self.result_visibility[note_id] = visible
         self.visibility_changed.emit(note_id, visible)
         self.refresh(self._all_notes, self.result_visibility)
@@ -822,6 +858,9 @@ class NoteManagerDialog(QDialog):
         self.refresh(self._all_notes, self.result_visibility)
 
     def _delete_note(self, note_id):
+        note = self._all_notes.get(note_id)
+        if note is None or note.archived:
+            return
         answer = QMessageBox.question(self, "Delete note?",
             "Delete this note? A synced note is moved to Google Keep’s Trash only "
             "when cloud writes are enabled. The note stays here until deletion succeeds.",
@@ -831,6 +870,9 @@ class NoteManagerDialog(QDialog):
             self.note_deleted.emit(note_id)
 
     def _show_color_menu(self, note_id, widget, pos):
+        note = self._all_notes.get(note_id)
+        if note is None or note.archived:
+            return
         menu = QMenu(self)
         for name, color in KEEP_COLORS.items():
             action = menu.addAction("Default" if name == "White" else name)
@@ -843,6 +885,10 @@ class NoteManagerDialog(QDialog):
         if note is None:
             return
         menu = QMenu(self)
+        if note.archived:
+            menu.addAction("View archived note (read-only)", lambda: self.note_edit_requested.emit(note_id))
+            menu.exec(widget.mapToGlobal(pos))
+            return
         menu.addAction("Edit note", lambda: self.note_edit_requested.emit(note_id))
         menu.addAction("Unpin from Keep" if note.pinned else "Pin to top of Keep",
                        lambda: self.pin_toggle_requested.emit(note_id))
@@ -862,3 +908,33 @@ class NoteManagerDialog(QDialog):
         menu.addSeparator()
         menu.addAction("Delete note", lambda: self._delete_note(note_id))
         menu.exec(widget.mapToGlobal(pos))
+
+    def show_archived_note(self, note, *, pending_edits=False):
+        """Read-only, resource-free preview. No archive mutation endpoints."""
+        dialog = QDialog(self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setWindowTitle("Archived note — read-only")
+        dialog.setWindowIcon(make_icon())
+        dialog.setStyleSheet(STYLE)
+        dialog.resize(600, 520)
+        layout = QVBoxLayout(dialog)
+        title = plain_label(note.title or "Untitled note")
+        title.setWordWrap(True)
+        layout.addWidget(title)
+        body = QTextEdit()
+        body.setReadOnly(True)
+        body.setAcceptRichText(False)
+        body.setPlainText(note.text)
+        layout.addWidget(body, 1)
+        layout.addWidget(plain_label(" · ".join(note.labels)))
+        info = plain_label("Cloud archive · read-only. Edit or unarchive this note in Google Keep.")
+        if pending_edits:
+            info.setText("This copy contains pending local edits. They are retained here, not uploaded. "
+                         "View the current archived version in Google Keep.")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+        close = QPushButton("Close")
+        close.clicked.connect(dialog.close)
+        layout.addWidget(close)
+        dialog.show()
+        return dialog

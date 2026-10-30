@@ -12,7 +12,7 @@ on:
       version:
         description: Exact installer version
         required: true
-        default: '2.3.0'
+        default: '2.3.2'
 
 permissions:
   contents: read
@@ -74,7 +74,7 @@ jobs:
           $data = Join-Path $env:RUNNER_TEMP 'release-smoke-data'
           $state = Join-Path $data 'KeepDesktop'
           New-Item -ItemType Directory -Path $state -Force | Out-Null
-          '{"seen_login":true,"start_offline":true,"cloud_writes_enabled":false,"autostart":false,"remember_google_account":false,"experimental_auth_consent":0}' | Set-Content (Join-Path $state 'config.json') -Encoding ascii
+          '{"seen_login":true,"start_offline":true,"cloud_writes_enabled":false,"cloud_writes_policy_version":2,"autostart":false,"remember_google_account":false,"experimental_auth_consent":0}' | Set-Content (Join-Path $state 'config.json') -Encoding ascii
           $start = [System.Diagnostics.ProcessStartInfo]::new()
           $start.FileName = $exe
           $start.WorkingDirectory = $app

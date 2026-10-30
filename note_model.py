@@ -18,3 +18,4 @@ class KeepNote:
     list_items: list = field(default_factory=list)
     local_order: int = 0
     dark_mode: bool = False
+    archived: bool = False

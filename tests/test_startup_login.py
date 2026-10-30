@@ -10,7 +10,8 @@ from keep_protocol.auth import AUTH_CONSENT_VERSION
 
 def startup_controller(config=None, *, authenticated=False, windows=None):
     return SimpleNamespace(config=dict(config or {}),
-                           sync=SimpleNamespace(is_authenticated=authenticated, writes_enabled=False),
+                           sync=SimpleNamespace(is_authenticated=authenticated, writes_enabled=False,
+                                                writes_requested=True),
                            windows=windows or {}, _do_login=MagicMock(),
                            _first_launch_login=MagicMock(), _new_note=MagicMock())
 
@@ -115,7 +116,7 @@ def test_successful_signin_clears_the_offline_startup_preference(monkeypatch, me
     controller.config["start_offline"] = True
     method(controller)
     assert controller.config["start_offline"] is False
-    assert controller.config["cloud_writes_enabled"] is False
+    assert controller.config["cloud_writes_enabled"] is True
     controller._full_sync.assert_called_once()
     assert controller._show_manager_after_sync is True
 

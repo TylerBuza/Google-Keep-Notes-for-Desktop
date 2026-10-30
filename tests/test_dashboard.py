@@ -316,9 +316,9 @@ def test_card_edit_keep_pin_and_desktop_pin_are_different_signals(dashboard, qap
 
 
 def test_disabled_management_is_not_fake_functionality(dashboard):
-    assert not dashboard._nav_buttons["archive"].isEnabled()
+    assert dashboard._nav_buttons["archive"].isEnabled()
     assert not dashboard._nav_buttons["trash"].isEnabled()
-    assert "safe sync" in dashboard._nav_buttons["archive"].toolTip()
+    assert "read-only" in dashboard._nav_buttons["archive"].toolTip()
 
 
 def test_delete_keeps_card_until_controller_confirms(dashboard, monkeypatch):

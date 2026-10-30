@@ -1,6 +1,6 @@
 """Conservative policy layer over the unofficial Keep protocol.
 
-No blind conflict winner, no cloud writes without opt-in, no automatic replay
+No blind conflict winner, no cloud writes before a verified read, no automatic replay
 after an uncertain write, and encrypted recovery copies before every mutation.
 This does NOT turn Google's private protocol into a supported public API.
 """
@@ -29,6 +29,14 @@ from keep_protocol.auth import AUTH_CONSENT_VERSION, SessionCredentials
 WRITE_CONSENT_VERSION = 1
 
 
+class SyncedNotes(list):
+    """One verified read's notes and label catalog, delivered as a unit."""
+
+    def __init__(self, notes, label_names):
+        super().__init__(notes)
+        self.label_names = label_names
+
+
 def snapshot(note: KeepNote) -> dict:
     doc = None if note.is_list else getattr(note, "styled_doc", None)
     if not note.is_list and doc is None:
@@ -48,18 +56,20 @@ def snapshot(note: KeepNote) -> dict:
             "html": to_html(doc) if doc is not None else "",
             "styled_doc": styled, "color_hex": note.color_hex,
             "pinned": note.pinned, "sort_key": note.sort_key,
-            "is_list": note.is_list, "list_items": items}
+            "is_list": note.is_list, "list_items": items,
+            "labels": list(note.labels), "archived": note.archived}
 
 
 def comparison(record: dict) -> dict:
     # HTML spelling and server ordering do not determine content identity.
-    return {key: value for key, value in record.items() if key not in ("html", "sort_key")}
+    return {key: value for key, value in record.items()
+            if key not in ("html", "sort_key", "labels", "archived")}
 
 
 def note_from_snapshot(record: dict) -> KeepNote:
     fields = {key: record[key] for key in (
         "id", "title", "text", "html", "color_hex", "pinned", "sort_key",
-        "is_list", "list_items") if key in record}
+        "is_list", "list_items", "labels", "archived") if key in record}
     note = KeepNote(**deepcopy(fields))
     doc = styled_doc_from_dict(record.get("styled_doc"))
     if doc is not None:
@@ -68,7 +78,7 @@ def note_from_snapshot(record: dict) -> KeepNote:
 
 
 class HardenedKeepSync(KeepSyncV2):
-    def __init__(self, *, writes_enabled=False, on_notice=None, on_conflict=None,
+    def __init__(self, *, writes_enabled=True, on_notice=None, on_conflict=None,
                  recovery_dir=None):
         super().__init__()
         self._lock = threading.RLock()
@@ -76,7 +86,9 @@ class HardenedKeepSync(KeepSyncV2):
         self.on_conflict = on_conflict or (lambda note_id: None)
         self.recovery_dir = Path(recovery_dir or Path(DATA_DIR) / "recovery")
         self.pause_file = self.recovery_dir.parent / "write-pause.dat"
-        self.writes_enabled = writes_enabled and not self.pause_file.exists()
+        self.writes_requested = writes_enabled is True
+        self._read_verified = False
+        self.writes_enabled = False
         self.baselines: dict[str, dict] = {}
         self.conflicts: dict[str, dict] = {}
         self._recovery_paths = {}
@@ -85,6 +97,7 @@ class HardenedKeepSync(KeepSyncV2):
     def login(self, email, master_token=None, password=None, *, remember=False,
               consent=False, android_id=None, cancel_event=None):
         with self._lock:
+            self.suspend_writes()
             cfg = load_config()
             owner = cfg.get("notes_account")
             if owner and owner.casefold() != email.casefold():
@@ -97,18 +110,14 @@ class HardenedKeepSync(KeepSyncV2):
                                remember=remember, consent=consent, android_id=android_id,
                                cancel_event=cancel_event)
             if ok:
-                # Persistent opt-in is deliberately new. Old one-session
-                # flags alone cannot silently authorize writes on reconnect.
-                self.writes_enabled = (
-                    cfg.get("cloud_writes_enabled") is True
-                    and type(cfg.get("cloud_writes_consent_version")) is int
-                    and cfg["cloud_writes_consent_version"] == WRITE_CONSENT_VERSION
-                    and bool(owner) and owner.casefold() == email.casefold()
-                    and not self.pause_file.exists())
+                # Requested mode is not the effective safety state. The first
+                # successful read must establish this account's state before
+                # any queued local edit can be sent.
+                self.writes_requested = cfg.get("cloud_writes_enabled", True) is True
                 cfg["notes_account"] = email
                 cfg["remember_google_account"] = remember
                 cfg["experimental_auth_consent"] = AUTH_CONSENT_VERSION
-                cfg["cloud_writes_enabled"] = self.writes_enabled
+                cfg["cloud_writes_consent_version"] = WRITE_CONSENT_VERSION
                 self._login_validation = {
                     "at": datetime.now(timezone.utc).isoformat(), "bearer_issued": True,
                     "keep_api_verified": False, "requested_scope": "https://www.googleapis.com/auth/memento",
@@ -128,11 +137,19 @@ class HardenedKeepSync(KeepSyncV2):
                     return False
             return ok
 
-    def set_writes_enabled(self, enabled):
+    def set_writes_enabled(self, enabled, *, acknowledge_pause=False):
         with self._lock:
-            if enabled:
+            if enabled and acknowledge_pause and self._create_pending is None:
                 self.pause_file.unlink(missing_ok=True)
-            self.writes_enabled = bool(enabled)
+            self.writes_requested = enabled is True
+            # Re-enabling, even manually, requires another fresh read.
+            self.suspend_writes()
+
+    def suspend_writes(self):
+        """Temporary read/auth safety stop; never change the user's mode."""
+        with self._lock:
+            self._read_verified = False
+            self.writes_enabled = False
 
     def _start_write(self, reason="write-in-flight", **details):
         # A crash during a request must not silently replay it on restart.
@@ -258,6 +275,7 @@ class HardenedKeepSync(KeepSyncV2):
     def fetch_notes(self, force_resync=False, hold_baseline_for=None):
         hold = hold_baseline_for or set()
         with self._lock:
+            self.suspend_writes()
             if self._client and isinstance(getattr(self._client, "creds", None), SessionCredentials):
                 try:
                     self._client.creds.mint_bearer()
@@ -271,6 +289,7 @@ class HardenedKeepSync(KeepSyncV2):
             try:
                 notes = super().fetch_notes(force_resync, hold)
             except KeepError as error:
+                self.suspend_writes()
                 if error.status in (401, 403):
                     try:
                         self.logout()
@@ -279,14 +298,27 @@ class HardenedKeepSync(KeepSyncV2):
                     self.on_notice("Google rejected this Keep session. The app is signed out and "
                                    "cloud writes are off. Do not bypass any Google security warning.")
                 raise
+            except Exception:
+                self.suspend_writes()
+                raise
             validation = getattr(self, "_login_validation", None)
-            if validation and not validation["keep_api_verified"]:
-                validation["keep_api_verified"] = True
-                save_json(Path(DATA_DIR) / "auth-validation.json", validation)
             for note in notes:
                 if note.id not in hold:
                     self.baselines[note.id] = snapshot(note)
-            return notes
+            labels = getattr(self._client, "labels", {})
+            names = sorted(set(labels.values()), key=str.casefold) if isinstance(labels, dict) else []
+            can_write = (self.writes_requested and self.is_authenticated
+                         and not self.pause_file.exists())
+            if validation and (not validation["keep_api_verified"]
+                               or validation["cloud_writes_enabled"] != can_write):
+                validation["keep_api_verified"] = True
+                validation["cloud_writes_enabled"] = can_write
+                # Save only non-secret status; a failure leaves runtime
+                # permission suspended rather than enabling ahead of the read.
+                save_json(Path(DATA_DIR) / "auth-validation.json", validation)
+            self._read_verified = self.is_authenticated
+            self.writes_enabled = can_write
+            return SyncedNotes(notes, names)
 
     def push_note(self, note):
         with self._lock:
@@ -404,6 +436,7 @@ class HardenedKeepSync(KeepSyncV2):
             self._client = None
             self._email = None
             self.writes_enabled = False
+            self._read_verified = False
             self.baselines.clear()
             self.conflicts.clear()
             self._create_pending = None

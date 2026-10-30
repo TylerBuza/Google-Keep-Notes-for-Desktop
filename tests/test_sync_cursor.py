@@ -63,6 +63,7 @@ def _node(nid="n1", **over):
 def client():
     c = KeepClient.__new__(KeepClient)
     c.notes = {}
+    c.labels = {}
     c.target_version = None
     c._stale_snapshot_ids = set()
     c._client_revision = {}

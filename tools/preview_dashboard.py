@@ -37,6 +37,7 @@ def main():
     parser.add_argument("--two-way", action="store_true", help="Show fictional sync-on UI; never connects")
     parser.add_argument("--card", action="store_true", help="Capture a fictional card to compare typography")
     parser.add_argument("--floating", action="store_true", help="Capture a fictional desktop note")
+    parser.add_argument("--view", choices=("notes", "archive", "label"), default="notes")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="keep-dashboard-") as data:
         os.environ["APPDATA"] = data
@@ -48,11 +49,20 @@ def main():
 
         app = QApplication([])
         samples = fictional_notes()
+        if args.view != "notes":
+            samples.extend([
+                KeepNote(id="demo-archive-1", title="Last season's ideas", labels=["Ideas"],
+                         archived=True, color_hex="#D7AEFB", text="Good thoughts, kept for another day."),
+                KeepNote(id="demo-archive-2", title="Finished project", labels=["Projects"],
+                         archived=True, color_hex="#AECBFA", text="Sketches, plans, and lessons worth keeping."),
+            ])
         notes = {note.id: note for note in samples}
-        dashboard = NoteManagerDialog(notes, {"demo-1": True})
+        dashboard = NoteManagerDialog(notes, {"demo-1": True}, cloud_labels=["Ideas", "Projects", "Someday"])
         dashboard.set_sync_state(True, args.two_way)
         dashboard.resize(args.width, args.height)
         dashboard.show()
+        if args.view != "notes":
+            dashboard._set_view("archive" if args.view == "archive" else "label:Ideas")
         target = dashboard
         editor = None
         floating = None

@@ -73,6 +73,7 @@ class KeepClient:
         self.target_version: Optional[str] = None
         # Cached notes by id. Updated on every sync.
         self.notes: dict[str, Note] = {}
+        self.labels: dict[str, str] = {}
         # Per-note write counters. Keep web increments clientRevision by
         # the number of ops sent in each bundle, and requestId by 1 per
         # bundle. We track both per note for the lifetime of this client.
@@ -254,12 +255,12 @@ class KeepClient:
     def sync(self, full: bool = False) -> dict[str, Any]:
         # A partial/malformed paginated pull must not advance the cursor or
         # become the basis for a destructive write. Roll back as one unit.
-        saved = copy.deepcopy((self.notes, self.target_version,
+        saved = copy.deepcopy((self.notes, self.labels, self.target_version,
                                self._stale_snapshot_ids, self._client_revision))
         try:
             return self._sync_pages(full)
         except Exception as exc:
-            (self.notes, self.target_version, self._stale_snapshot_ids,
+            (self.notes, self.labels, self.target_version, self._stale_snapshot_ids,
              self._client_revision) = saved
             if isinstance(exc, KeepError):
                 raise
@@ -356,6 +357,25 @@ class KeepClient:
                 seen_cursors.add(cursor)
 
             self.target_version = data.get("toVersion") or self.target_version
+
+            # A supplied list replaces the label catalog; omission in an
+            # incremental page means unchanged, not "delete all labels".
+            if "userInfo" in data:
+                info = data["userInfo"]
+                if not isinstance(info, dict):
+                    raise KeepError("Keep returned malformed label data; cache unchanged.")
+                if "labels" in info:
+                    rows = info["labels"]
+                    if not isinstance(rows, list):
+                        raise KeepError("Keep returned malformed label data; cache unchanged.")
+                    labels = {}
+                    for row in rows:
+                        if (not isinstance(row, dict) or not isinstance(row.get("mainId"), str)
+                                or not row["mainId"] or not isinstance(row.get("name"), str)
+                                or not row["name"] or row["mainId"] in labels):
+                            raise KeepError("Keep returned malformed label data; cache unchanged.")
+                        labels[row["mainId"]] = row["name"]
+                    self.labels = labels
 
             for n in nodes:
                 nid = n.get("id", "")

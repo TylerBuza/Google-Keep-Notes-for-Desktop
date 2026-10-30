@@ -15,7 +15,7 @@
 </div>
 
 > **Unofficial, experimental, and currently unsigned.** Not affiliated with Google.
-> Back up important notes before enabling cloud writes. Antivirus results are
+> Back up important notes before signing in for two-way sync. Antivirus results are
 > not a security guarantee.
 
 ## What it does
@@ -27,7 +27,8 @@
 - **Matching Keep icons:** the tray, windows, taskbar, and EXE use the same logo.
 - **Floating, pinnable notes:** text and checklists on your desktop, remembered
   placement, resizing, local always-on-top, and hide without deleting.
-- **Guarded Google Keep sync:** offline edits, explicitly enabled two-way writes,
+- **Cloud browsing:** existing labels in the sidebar and a read-only Archive view.
+- **Guarded Google Keep sync:** offline edits, two-way sync on by default after a verified read,
   conflict handling, encrypted recovery copies, and pauses for uncertain writes.
 - **Local security controls:** Windows DPAPI storage, reviewed Google-only runtime
   destinations, blocked note resources/external links, and no automatic updater.
@@ -55,7 +56,9 @@ clean-binary claim. Let sync finish, save edits, and **tray → Quit** before up
 
 Start offline, or use the tray to sign in through Google's visible HTTPS page.
 Remembered sign-in stores a powerful token protected for your Windows user.
-Cloud writes start **OFF**; enabling them includes **all queued local edits**.
+Signing in enables **two-way sync**, including **all queued local edits**, after a verified read.
+Pause uploads in the tray menu. Conflicts and uncertain writes still stop for review.
+Upgrading switches the old OFF default to two-way; pause again if you want uploads off.
 Other software running as your Windows user may access saved credentials.
 
 The internal executable/data-folder name remains `KeepDesktop` for compatibility.
@@ -64,7 +67,7 @@ Details: [security and sign-in](SECURITY.md) · [hashes, scans, and builds](docs
 ## Know the limits
 
 This uses Google's **unofficial internal API**, which can change without notice.
-Archive/Trash browsing, label editing, attachments, and reminders aren't
+Archive browsing is read-only. Trash browsing, label editing, attachments, and reminders aren't
 implemented; remote text/checklist conversion is blocked. A WebEngine shutdown
 hang remains under investigation. Live cloud-write correctness has not been
 comprehensively verified. Keep independent backups; do not disable antivirus

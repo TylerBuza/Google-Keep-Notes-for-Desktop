@@ -26,11 +26,15 @@ def sync(tmp_path, qapp):
     instance._client = MagicMock(spec=KeepClient)
     remote = server()
     instance._client.notes = {remote.id: remote}
+    instance._client.labels = {}
+    instance._client.list_notes.return_value = [remote]
     instance._server_notes = {remote.id: remote}
     instance._client.is_snapshot_stale.return_value = False
     instance._client.pop_stale_snapshot_ids.return_value = set()
     base = KeepNote(id="1.test", title="title", text="base")
     instance.register_cached_note(base, snapshot(base))
+    instance.fetch_notes()  # Synthetic verified read; no live network.
+    instance._client.reset_mock()
     return instance
 
 
@@ -56,14 +60,14 @@ def test_read_only_default_blocks_every_mutation(sync):
 @pytest.mark.parametrize("enabled,version,owner,expected", [
     (True, 1, "test@example.test", True),
     (False, 1, "test@example.test", False),
-    (True, 0, "test@example.test", False),
-    (True, True, "test@example.test", False),
-    (True, "1", "test@example.test", False),
-    (True, 2, "test@example.test", False),
+    (True, 0, "test@example.test", True),
+    (True, True, "test@example.test", True),
+    (True, "1", "test@example.test", True),
+    (True, 2, "test@example.test", True),
     ("true", 1, "test@example.test", False),
-    (True, 1, None, False),
+    (True, 1, None, True),
 ])
-def test_only_new_explicit_account_bound_write_consent_survives_login(
+def test_login_keeps_requested_mode_but_requires_a_fresh_read(
         sync, monkeypatch, enabled, version, owner, expected):
     cfg = {"notes_account": owner, "cloud_writes_enabled": enabled,
            "cloud_writes_consent_version": version}
@@ -73,9 +77,12 @@ def test_only_new_explicit_account_bound_write_consent_survives_login(
     monkeypatch.setattr("hardened_sync.save_json", MagicMock())
     monkeypatch.setattr("keep_sync_v2.KeepSyncV2.login", lambda *args, **kwargs: True)
     assert sync.login("test@example.test", master_token="synthetic", remember=True, consent=True)
+    assert not sync.writes_enabled
+    assert sync.writes_requested is expected
+    assert cfg["cloud_writes_enabled"] == enabled
+    assert sync._login_validation["cloud_writes_enabled"] is False
+    sync.fetch_notes()
     assert sync.writes_enabled is expected
-    assert cfg["cloud_writes_enabled"] is expected
-    assert sync._login_validation["cloud_writes_enabled"] is expected
 
 
 def test_persistent_write_consent_cannot_clear_an_uncertain_write_on_login(sync, monkeypatch):
@@ -89,7 +96,10 @@ def test_persistent_write_consent_cannot_clear_an_uncertain_write_on_login(sync,
     assert sync.login("test@example.test", master_token="synthetic", remember=True, consent=True)
     assert not sync.writes_enabled
     assert sync.pause_file.exists()
-    assert cfg["cloud_writes_enabled"] is False
+    assert cfg["cloud_writes_enabled"] is True
+    sync.fetch_notes()
+    assert not sync.writes_enabled
+    assert sync.pause_file.exists()
 
 
 def test_persistent_consent_is_not_transferred_to_another_account(sync, monkeypatch):

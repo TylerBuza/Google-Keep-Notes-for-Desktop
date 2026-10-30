@@ -107,8 +107,9 @@ def load_config():
         "autostart": False,
         "always_on_top": False,
         "opacity": 0.95,
-        "cloud_writes_enabled": False,
-        "cloud_writes_consent_version": 0,
+        "cloud_writes_enabled": True,
+        "cloud_writes_consent_version": 1,
+        "cloud_writes_policy_version": 2,
         "remember_google_account": False,
         "experimental_auth_consent": 0,
         "start_offline": False,
@@ -122,6 +123,14 @@ def load_config():
     saved = load_json(CONFIG_FILE, {})
     # Merge: saved values win, defaults fill in any missing keys
     merged = {**defaults, **saved}
+    # Earlier builds persisted temporary read failures as an OFF preference.
+    # Upgrade to the normal two-way default once. The separate durable
+    # uncertain-write journal is NEVER cleared here. Subsequent manual pauses
+    # are preserved by policy version 2, including across sign-out/sign-in.
+    if saved.get("cloud_writes_policy_version") != 2:
+        merged["cloud_writes_enabled"] = True
+        merged["cloud_writes_consent_version"] = 1
+        merged["cloud_writes_policy_version"] = 2
     return merged
 
 

@@ -347,7 +347,10 @@ class KeepSyncV2:
                 # onward, like syncing that note "just stopped".
             out: list[KeepNote] = []
             prev_by_id = {n.id: n for n in self._last_returned}
-            for note in self._client.list_notes():
+            label_catalog = getattr(self._client, "labels", {})
+            if not isinstance(label_catalog, dict):
+                label_catalog = {}
+            for note in self._client.list_notes(include_archived=True):
                 self._server_notes[note.id] = note
                 if note.is_deleted or note.is_trashed:
                     continue
@@ -406,6 +409,8 @@ class KeepSyncV2:
                                     color_hex=_wire_color_to_hex(note.color),
                                     pinned=note.is_pinned,
                                     trashed=note.is_trashed,
+                                    archived=note.is_archived,
+                                    labels=[label_catalog[lid] for lid in note.label_ids if lid in label_catalog],
                                     sort_key=int(note.sort_value or 0),
                                 )
                                 approx_kn.styled_doc = approx_doc  # type: ignore[attr-defined]
@@ -476,6 +481,8 @@ class KeepSyncV2:
                         color_hex=color_hex,
                         pinned=note.is_pinned,
                         trashed=note.is_trashed,
+                        archived=note.is_archived,
+                        labels=[label_catalog[lid] for lid in note.label_ids if lid in label_catalog],
                         sort_key=sort_idx,
                         is_list=True,
                         list_items=items,
@@ -537,6 +544,8 @@ class KeepSyncV2:
                         color_hex=color_hex,
                         pinned=note.is_pinned,
                         trashed=note.is_trashed,
+                        archived=note.is_archived,
+                        labels=[label_catalog[lid] for lid in note.label_ids if lid in label_catalog],
                         sort_key=sort_idx,
                     )
                     # Stash the decoded StyledDoc as a non-dataclass

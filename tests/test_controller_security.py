@@ -97,8 +97,7 @@ def test_failed_signout_still_disables_startup_login_and_writes(monkeypatch):
     AppController._do_sign_out(controller)
     assert "email" not in controller.config
     assert controller.config["sync_enabled"] is False
-    assert controller.config["cloud_writes_enabled"] is False
-    assert controller.config["cloud_writes_consent_version"] == 0
+    assert controller.config["cloud_writes_enabled"] is True  # Mode survives sign-out; backend is disabled.
     save.assert_called_once_with(controller.config)
 
 
@@ -110,7 +109,7 @@ def test_only_explicit_two_way_toggle_records_persistent_write_consent(monkeypat
     monkeypatch.setattr("app_controller.save_config", MagicMock())
     engine = MagicMock()
     engine.pause_file.exists.return_value = False
-    ctl = SimpleNamespace(sync=engine, config={}, _writes_action=MagicMock(),
+    ctl = SimpleNamespace(sync=engine, config={"cloud_writes_enabled": False}, _writes_action=MagicMock(),
         _update_dashboard_sync_state=MagicMock(), _full_sync=MagicMock())
     AppController._toggle_cloud_writes(ctl, True)
     assert ctl.config["cloud_writes_enabled"] is accept
@@ -222,8 +221,9 @@ def test_read_failure_pauses_writes_and_notifies_once_without_a_modal(monkeypatc
         _read_sync_error_active=False)
     AppController._on_read_sync_failed(controller)
     AppController._on_read_sync_failed(controller)
-    assert controller.config["cloud_writes_enabled"] is False
-    controller.sync.set_writes_enabled.assert_called_with(False)
+    assert controller.config["cloud_writes_enabled"] is True
+    controller.sync.set_writes_enabled.assert_not_called()
+    save.assert_not_called()
     controller.tray.showMessage.assert_called_once()
     warning.assert_not_called()
 

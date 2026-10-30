@@ -68,6 +68,16 @@ class Note:
     @classmethod
     def from_server(cls, n: dict[str, Any]) -> "Note":
         ts = n.get("timestamps") or {}
+        refs = n.get("labelIds", [])
+        if not isinstance(refs, list):
+            raise ValueError("Malformed Keep label references")
+        label_ids = []
+        for ref in refs:
+            if (not isinstance(ref, dict) or not isinstance(ref.get("labelId"), str)
+                    or not ref["labelId"]):
+                raise ValueError("Malformed Keep label reference")
+            if _parse_ts(ref.get("deleted")) is None:
+                label_ids.append(ref["labelId"])
         indexable = n.get("indexableText") or ""
         # `text` exists for legacy/never-touched-by-web notes. Once a note
         # has a docs-nestedModel snapshot, the server stops echoing `text`
@@ -119,7 +129,7 @@ class Note:
             user_edited=_parse_ts(ts.get("userEdited")),
             sort_value=int(n.get("sortValue", 0)),
             base_version=str(n.get("baseVersion", "0")),
-            label_ids=[lr.get("labelId", "") for lr in (n.get("labelIds") or [])],
+            label_ids=label_ids,
             list_items=items,
             sct_id=sct_id,
             serialized_chunks=chunks,

@@ -160,13 +160,17 @@ before discarding unsaved drafts.
 
 Delete confirmation does not optimistically remove a card: the existing guarded
 delete path must confirm success. Remote note-type conversion remains blocked.
-Archive/Trash browsing and label editing are intentionally not implemented; their
-look must not imply safe write support. No endpoint, token-retention, consent,
-write opt-in, recovery or write-acknowledgment policy was relaxed for this UI.
+Archive browsing is read-only; archived notes cannot be edited, pinned, recolored,
+trashed, or opened as editable desktop windows here. Pending edits made before a
+web archive are retained locally. Existing cloud labels are sidebar filters,
+including empty labels. Trash browsing and label mutations remain unsupported.
+The label catalog, references and archive state use the existing read endpoint;
+catalog parsing participates in all-page rollback. The catalog and per-note
+metadata are saved atomically with notes in the DPAPI-protected cache.
 
 Keep pins and desktop pins remain distinct. A pin-only edit now routes through
 the guarded metadata writer instead of a body-diff no-op. It still requires
-write opt-in, a fresh full read, conflict/staleness checks, encrypted recovery
+two-way mode, a fresh full read, conflict/staleness checks, encrypted recovery
 and write intent, and the same strict server acknowledgment. Uncertain metadata
 writes pause without advancing the baseline. Pulls do not overwrite dirty pins
 or ordering, and clean remote metadata is backed up before adoption. These paths
@@ -209,7 +213,10 @@ proof of packet-level isolation of Chromium internals.
 Note rendering and HTML conversion cannot load linked resources (including
 remote images, fonts, file and UNC paths). Note links never launch a browser,
 mailer or dialer, even for Google links, since an external app could fetch other
-resources. About uses selectable source/license attribution, not active links.
+resources. About's sole active link is the fixed `https://buza.dev` homepage,
+opened in the user's external browser only on a click. The app does not fetch
+that site; arbitrary note/login links remain blocked. Source/license attribution
+remains selectable text. External browser traffic is outside the app's policy.
 The runtime updater's HTTP/download/installer code is removed entirely, not
 just hidden behind a setting. Source/build tools can still contact GitHub,
 PyPI and advisory services separately; they receive no Google credentials.
@@ -223,15 +230,21 @@ a separately managed OS/network firewall; it is not claimed here.
 
 ## Sync safety
 
-Cloud writes start disabled. From private.9, an explicit write opt-in records
-`cloud_writes_consent_version: 1`. That preference may survive a successful
-reconnect only when the saved notebook owner matches the Google-verified account,
-the flag is exactly true, the consent version is the supported integer, and no
-write-pause marker exists. Old session-only flags do not grant persistent writes.
-Signing out resets the grant. Read/auth/write failures still disable writes;
-reconnecting never clears an uncertain-write marker or automatically replays a
-possibly completed create. This changes consent persistence, not endpoint,
-fresh-read, conflict, recovery, acknowledgment or anti-replay safeguards.
+Two-way sync is the normal signed-in default. The visible sign-in disclosure
+includes queued local edits. Requested mode and effective write permission are
+separate: authentication, notebook/account binding, a successful fresh read and
+absence of a durable uncertain-write marker are required before uploading.
+Read failures suspend uploads without persisting a permanent OFF preference;
+a subsequent verified read can resume them. Explicit manual pauses survive
+reconnects and sign-out. Sign-out always disables authenticated access.
+
+At the user's request, older configs migrate once to this two-way default via
+`cloud_writes_policy_version: 2`; earlier OFF values did not distinguish manual
+pauses from failed-read pauses. This migration enables that preference, but
+never deletes a write-pause journal or bypasses account/read/conflict checks.
+New manual pauses are preserved. Neither login, migration nor successful reads
+clear uncertain-write markers or automatically replay a possibly completed
+create. Explicit review/resume still requires a fresh read afterward.
 
 Before writing an existing note, the app pulls
 authoritative state and compares it against a persisted baseline. Concurrent

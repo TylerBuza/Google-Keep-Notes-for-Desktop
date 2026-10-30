@@ -9,7 +9,7 @@ from queue import Empty, SimpleQueue
 from functools import partial
 
 from PySide6.QtCore import Qt, QTimer, Slot, Signal, QObject, QUrl
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QFont
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QFont, QDesktopServices
 from PySide6.QtNetwork import QNetworkCookie
 from PySide6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QDialog,
@@ -389,7 +389,7 @@ class LoginDialog(QDialog):
             "Signing out removes this app's saved credential but does not revoke it at Google. "
             "Revoke the device/session in Google Account Security if needed.\n\n"
             "Only allowlisted Google-owned HTTPS destinations are permitted by the app. "
-            "Third-party resources and opening external links are blocked. Cloud writes start OFF. "
+            "Third-party resources and note links are blocked. Two-way sync starts after a verified read. "
             "You can cancel and use offline notes."
         )
         self._retention_details.setTextFormat(Qt.TextFormat.PlainText)
@@ -398,6 +398,12 @@ class LoginDialog(QDialog):
         self._retention_details.hide()
         self._details_btn.toggled.connect(self._toggle_security_details)
         layout.addWidget(self._retention_details)
+        sync_hint = QLabel("Signing in enables two-way Google Keep sync, including queued local edits. "
+                           "You can pause uploads in the tray menu. Unverified writes stay paused.")
+        sync_hint.setTextFormat(Qt.TextFormat.PlainText)
+        sync_hint.setWordWrap(True)
+        sync_hint.setStyleSheet("padding: 8px; font-size: 12px;")
+        layout.addWidget(sync_hint)
         self._continue_btn = QPushButton("Continue to Google")
         self._continue_btn.setDefault(True)
         self._details_btn.setAutoDefault(False)
@@ -753,7 +759,7 @@ class LoginDialog(QDialog):
 class AppController(QObject):
     """Orchestrates note windows, tray icon, and Keep sync."""
 
-    _remote_notes_ready = Signal(list)
+    _remote_notes_ready = Signal(object)
     _note_merged_during_push = Signal(str)  # note_id
     _sync_notice = Signal(str)
     _sync_conflict = Signal(str)
@@ -784,7 +790,7 @@ class AppController(QObject):
         # Never silently fall back to the unsafe legacy writer.
         from hardened_sync import HardenedKeepSync
         self.sync = HardenedKeepSync(
-            writes_enabled=self.config.get("cloud_writes_enabled", False),
+            writes_enabled=self.config.get("cloud_writes_enabled", True),
             on_notice=self._sync_notice.emit, on_conflict=self._sync_conflict.emit,
         )
         self._sync_notice.connect(self._on_sync_problem)
@@ -796,6 +802,7 @@ class AppController(QObject):
         self._show_manager_after_sync = False
         self.windows: dict[str, NoteWindow] = {}
         self._notes: dict[str, KeepNote] = {}
+        self._cloud_labels = []
         self._dirty: set[str] = set()
         # Notes whose CACHE (self._notes[id].text/.html/.styled_doc)
         # was just updated -- by push_note's merge result, or by a
@@ -945,7 +952,7 @@ class AppController(QObject):
 
         self._writes_action = QAction("Two-way Google Keep sync (text, pins, checklists)", menu)
         self._writes_action.setCheckable(True)
-        self._writes_action.setChecked(self.sync.writes_enabled)
+        self._writes_action.setChecked(self.config.get("cloud_writes_enabled", True))
         self._writes_action.toggled.connect(self._toggle_cloud_writes)
         menu.addAction(self._writes_action)
         conflicts = menu.addAction("Resolve sync conflicts…")
@@ -1011,7 +1018,8 @@ class AppController(QObject):
         dlg = getattr(self, "_manager_dlg", None)
         if dlg is not None:
             dlg.set_sync_state(self.sync.is_authenticated,
-                               self.config.get("cloud_writes_enabled", False))
+                               self.sync.writes_enabled,
+                               self.config.get("cloud_writes_enabled", True))
 
     def _on_login_action(self):
         if self.sync.is_authenticated:
@@ -1032,9 +1040,14 @@ class AppController(QObject):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
-            enabled = answer == QMessageBox.StandardButton.Yes
-        self.sync.set_writes_enabled(enabled)
+            if answer != QMessageBox.StandardButton.Yes:
+                self._writes_action.blockSignals(True)
+                self._writes_action.setChecked(self.config.get("cloud_writes_enabled", True))
+                self._writes_action.blockSignals(False)
+                return
+        self.sync.set_writes_enabled(enabled, acknowledge_pause=enabled)
         self.config["cloud_writes_enabled"] = enabled
+        self.config["cloud_writes_policy_version"] = 2
         if enabled:
             from hardened_sync import WRITE_CONSENT_VERSION
             self.config["cloud_writes_consent_version"] = WRITE_CONSENT_VERSION
@@ -1048,12 +1061,7 @@ class AppController(QObject):
 
     @Slot(str)
     def _on_sync_problem(self, message):
-        self.config["cloud_writes_enabled"] = False
-        self.sync.set_writes_enabled(False)
-        save_config(self.config)
-        self._writes_action.blockSignals(True)
-        self._writes_action.setChecked(False)
-        self._writes_action.blockSignals(False)
+        self.sync.suspend_writes()
         self._update_login_action_text()
         QMessageBox.warning(None, "KeepDesktop — sync paused", message)
 
@@ -1061,12 +1069,8 @@ class AppController(QObject):
     def _on_read_sync_failed(self):
         # A failed read is not a successful empty notebook. Pause writes and
         # report it once, without a modal dialog every periodic retry.
-        self.config["cloud_writes_enabled"] = False
-        self.sync.set_writes_enabled(False)
-        save_config(self.config)
-        self._writes_action.blockSignals(True)
-        self._writes_action.setChecked(False)
-        self._writes_action.blockSignals(False)
+        # The backend suspends before reporting the failure. Don't race a
+        # later successful read by changing its state in this queued slot.
         self._update_login_action_text()
         self.tray.setToolTip("KeepDesktop — Keep notes could not be loaded")
         if not self._read_sync_error_active:
@@ -1173,6 +1177,8 @@ class AppController(QObject):
                 "html": note.html,
                 "color_hex": note.color_hex,
                 "pinned": note.pinned,
+                "labels": note.labels,
+                "archived": note.archived,
                 "sort_key": note.sort_key,
                 "is_list": note.is_list,
                 "list_items": note.list_items,
@@ -1191,12 +1197,15 @@ class AppController(QObject):
             if sdoc is not None:
                 entry["styled_doc"] = styled_doc_to_dict(sdoc)
             data[nid] = entry
+        data["_keepdesktop_metadata"] = {"labels": getattr(self, "_cloud_labels", [])}
         save_notes(data)
 
     def _load_notes_from_disk(self):
         from config import NOTES_FILE
         from keep_protocol.nested_model import styled_doc_from_dict
         data = load_notes()
+        metadata = data.pop("_keepdesktop_metadata", {})
+        self._cloud_labels = metadata.get("labels", [])
         log.info("Loading %d notes from disk cache (%s)",
                  len(data), NOTES_FILE)
         for nid, d in data.items():
@@ -1207,6 +1216,8 @@ class AppController(QObject):
                 html=d.get("html", ""),
                 color_hex=d.get("color_hex", "#FFF475"),
                 pinned=d.get("pinned", False),
+                labels=d.get("labels", []),
+                archived=d.get("archived", False),
                 sort_key=d.get("sort_key", 0),
                 is_list=d.get("is_list", False),
                 list_items=d.get("list_items", []),
@@ -1226,7 +1237,7 @@ class AppController(QObject):
 
     def _show_persisted_notes(self):
         for note_id, note in self._notes.items():
-            if self._visibility.get(note_id, True):
+            if not note.archived and self._visibility.get(note_id, True):
                 win = self._create_window(note)
                 self.windows[note_id] = win
                 # Show first so Qt has a chance to attach window icon
@@ -1326,6 +1337,8 @@ class AppController(QObject):
     def _on_note_changed(self, note_id):
         win = self.windows.get(note_id)
         note = self._notes.get(note_id)
+        if note is not None and note.archived:
+            return
         if win and note:
             text_before, html_before = note.text, note.html
             note.text = win.get_text()
@@ -1381,6 +1394,8 @@ class AppController(QObject):
 
     @Slot(str)
     def _on_note_deleted(self, note_id):
+        if note_id in self._notes and self._notes[note_id].archived:
+            return
         if note_id in self._pending_deletes:
             return
         note = self._notes.get(note_id)
@@ -1480,7 +1495,7 @@ class AppController(QObject):
     def _toggle_note_pin(self, note_id: str):
         """Toggle the Keep ``isPinned`` flag and sync."""
         note = self._notes.get(note_id)
-        if note is None:
+        if note is None or note.archived:
             return
         note.pinned = not bool(getattr(note, "pinned", False))
         self._dirty.add(note_id)
@@ -1498,11 +1513,11 @@ class AppController(QObject):
     def _reorder_note(self, note_id: str, action: str):
         """Move ``note_id`` within the user-imposed order."""
         note = self._notes.get(note_id)
-        if note is None:
+        if note is None or note.archived:
             return
         # Build the current ordered list (mirrors NoteManagerDialog sort).
         ordered = sorted(
-            self._notes.values(),
+            (n for n in self._notes.values() if not n.archived),
             key=lambda n: (
                 not n.pinned,
                 (0, n.local_order) if n.local_order
@@ -1543,7 +1558,7 @@ class AppController(QObject):
         existing = getattr(self, "_manager_dlg", None)
         if existing is not None:
             try:
-                existing.refresh(self._notes, self._visibility)
+                existing.refresh(self._notes, self._visibility, getattr(self, "_cloud_labels", []))
                 if existing.isMinimized():
                     existing.setWindowState(
                         existing.windowState() & ~Qt.WindowState.WindowMinimized
@@ -1565,6 +1580,7 @@ class AppController(QObject):
         dlg = NoteManagerDialog(
             self._notes, self._visibility,
             font_scale=self.config.get("font_scale", 1.0),
+            cloud_labels=getattr(self, "_cloud_labels", []),
         )
         dlg.setModal(False)
         dlg.note_deleted.connect(self._on_note_deleted)
@@ -1591,6 +1607,8 @@ class AppController(QObject):
 
     def _on_manager_visibility_changed(self, note_id: str, is_visible: bool):
         """Desktop pinning is local only, entirely separate from Keep's pin."""
+        if note_id in self._notes and self._notes[note_id].archived:
+            return
         self._visibility[note_id] = is_visible
         _save_visibility(self._visibility)
         note = self._notes.get(note_id)
@@ -1631,6 +1649,9 @@ class AppController(QObject):
                 if is_new else self._notes.get(note_id))
         if note is None:
             return
+        if note.archived:
+            manager.show_archived_note(note, pending_edits=note.id in self._dirty)
+            return
         editor = manager.create_editor(note, is_new=is_new)
         editor.save_requested.connect(lambda changes: self._save_dashboard_edit(editor, changes))
         manager.show_editor()
@@ -1640,6 +1661,10 @@ class AppController(QObject):
         from copy import deepcopy
         note_id = editor.note_id
         original = self._notes.get(note_id)
+        if original is not None and original.archived:
+            editor.show_error("This note was archived in Google Keep. Copy your draft before closing; "
+                              "archived notes are read-only here.")
+            return
         if editor.is_new:
             if not changes:
                 editor.accept()
@@ -1712,7 +1737,7 @@ class AppController(QObject):
     def _change_dashboard_color(self, note_id, color_hex):
         from config import KEEP_COLORS
         note = self._notes.get(note_id)
-        if note is None or color_hex not in KEEP_COLORS.values() or note.color_hex == color_hex:
+        if note is None or note.archived or color_hex not in KEEP_COLORS.values() or note.color_hex == color_hex:
             return
         note.color_hex = color_hex
         self._dirty.add(note_id)
@@ -1741,12 +1766,12 @@ class AppController(QObject):
     def _refresh_manager_if_open(self):
         dlg = getattr(self, "_manager_dlg", None)
         if dlg is not None:
-            dlg.refresh(self._notes, self._visibility)
+            dlg.refresh(self._notes, self._visibility, getattr(self, "_cloud_labels", []))
             self._update_dashboard_sync_state()
 
     def _apply_visibility(self):
         for note_id, note in self._notes.items():
-            should_show = self._visibility.get(note_id, True)
+            should_show = not note.archived and self._visibility.get(note_id, True)
             win = self.windows.get(note_id)
             if should_show:
                 if win is None:
@@ -1895,10 +1920,8 @@ class AppController(QObject):
                                 "Local access is disabled. Revoke this device in your Google account.")
         self._sync_timer.stop()
         self._sync_debounce.stop()
-        self.config["cloud_writes_enabled"] = False
-        self.config["cloud_writes_consent_version"] = 0
         self._writes_action.blockSignals(True)
-        self._writes_action.setChecked(False)
+        self._writes_action.setChecked(self.config.get("cloud_writes_enabled", True))
         self._writes_action.blockSignals(False)
 
         self.config["sync_enabled"] = False
@@ -1912,6 +1935,7 @@ class AppController(QObject):
                 win.deleteLater()
             self.windows.clear()
             self._notes.clear()
+            self._cloud_labels = []
             self._visibility.clear()
             self._dirty.clear()
             self.config.pop("notes_account", None)
@@ -1943,7 +1967,7 @@ class AppController(QObject):
             self.config["start_offline"] = False
             self._show_manager_after_sync = not any("." in nid for nid in self._notes)
             self.config["notes_account"] = email
-            self.config["cloud_writes_enabled"] = self.sync.writes_enabled is True
+            self.config["cloud_writes_enabled"] = self.sync.writes_requested is True
             self._writes_action.blockSignals(True)
             self._writes_action.setChecked(self.config["cloud_writes_enabled"])
             self._writes_action.blockSignals(False)
@@ -1975,7 +1999,7 @@ class AppController(QObject):
                 self.config["notes_account"] = email
             self.config["remember_google_account"] = remember
             self.config["experimental_auth_consent"] = AUTH_CONSENT_VERSION
-            self.config["cloud_writes_enabled"] = self.sync.writes_enabled is True
+            self.config["cloud_writes_enabled"] = self.sync.writes_requested is True
             self._writes_action.blockSignals(True)
             self._writes_action.setChecked(self.config["cloud_writes_enabled"])
             self._writes_action.blockSignals(False)
@@ -2012,7 +2036,7 @@ class AppController(QObject):
                 self.config["notes_account"] = email
             self.config["remember_google_account"] = remember
             self.config["experimental_auth_consent"] = AUTH_CONSENT_VERSION
-            self.config["cloud_writes_enabled"] = self.sync.writes_enabled is True
+            self.config["cloud_writes_enabled"] = self.sync.writes_requested is True
             self._writes_action.blockSignals(True)
             self._writes_action.setChecked(self.config["cloud_writes_enabled"])
             self._writes_action.blockSignals(False)
@@ -2110,6 +2134,9 @@ class AppController(QObject):
     def _apply_remote_notes(self, remote_notes: list):
         """Apply remote note data on the main thread."""
         self._read_sync_error_active = False
+        labels = getattr(remote_notes, "label_names", None)
+        if labels is not None:
+            self._cloud_labels = list(labels)
         self.tray.setToolTip("KeepDesktop")
         from sync_merge import decide_merge, MergeAction
         log.info("Applying %d remote notes (local dirty=%s)",
@@ -2120,6 +2147,20 @@ class AppController(QObject):
                 # Local delete still in flight — don't resurrect.
                 continue
             existing = self._notes.get(rn.id)
+            if existing is not None:
+                # Read-only cloud metadata must follow Keep even while the
+                # local body has pending edits. Those edits remain queued;
+                # the backend refuses writes to archived server notes.
+                existing.labels = list(rn.labels)
+                existing.archived = rn.archived
+            if rn.archived:
+                win = self.windows.pop(rn.id, None)
+                if win is not None:
+                    win.close()
+                    win.deleteLater()
+                if self._visibility.get(rn.id) is not False:
+                    self._visibility[rn.id] = False
+                    _save_visibility(self._visibility)
             if existing is None:
                 log.info("New remote note %s", rn.id[:8])
                 self._notes[rn.id] = rn
@@ -2129,7 +2170,7 @@ class AppController(QObject):
                     self._visibility[rn.id] = False
                     _save_visibility(self._visibility)
                     new_remote_ids.append(rn.id)
-                if self._visibility.get(rn.id, False):
+                if not rn.archived and self._visibility.get(rn.id, False):
                     self._add_window_for_note(rn)
             else:
                 # Compute merge decision with the user's editing state.
@@ -2165,7 +2206,7 @@ class AppController(QObject):
 
                 # Pinning and ordering are editable surfaces too. Only adopt
                 # remote metadata after SKIP_DIRTY and secure recovery, never
-                # erase a pin still waiting for cloud-write opt-in or upload.
+                # erase a pin still waiting for verification or upload.
                 existing.sort_key = rn.sort_key
                 existing.pinned = rn.pinned
 
@@ -2379,6 +2420,8 @@ class AppController(QObject):
         if not note:
             self._dirty.discard(note_id)
             return
+        if note.archived:
+            return  # Retain any queued pre-archive edits without uploading.
         if _is_local_note_id(note_id):
             self._push_new_note(note)
             return
@@ -2744,14 +2787,18 @@ class AppController(QObject):
         body = QLabel(
             f"<h3>{APP_NAME} {APP_VERSION}</h3>"
             "<p>Google Keep on your Windows desktop as floating sticky notes.</p>"
+            '<p>Made by Tyler Buza · <a href="https://buza.dev">buza.dev</a></p>'
+            "<p>Built on LukeCGG's original sticky-note and pinning foundation.</p>"
             "<p>Licensed under the "
             "GNU Affero General Public License v3.0 (included in LICENSE).</p>"
             f"<p>Source: github.com/{GITHUB_REPO} (copy into a browser separately).</p>"
-            "<p>Google-only runtime networking. External links and in-app updater "
-            "downloads are disabled.</p>"
+            "<p>Google-only app networking. Note links and in-app updater downloads are disabled. "
+            "The homepage above opens separately in your browser.</p>"
         )
         body.setOpenExternalLinks(False)
-        body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse
+                                     | Qt.TextInteractionFlag.LinksAccessibleByMouse)
+        body.linkActivated.connect(self._open_about_homepage)
         body.setWordWrap(True)
         v.addWidget(body)
 
@@ -2772,6 +2819,13 @@ class AppController(QObject):
         v.addLayout(btn_row)
 
         dlg.exec()
+        dlg.deleteLater()
+
+    @staticmethod
+    def _open_about_homepage(url):
+        # This one fixed, user-clicked About link is not a general URL opener.
+        if url == "https://buza.dev":
+            QDesktopServices.openUrl(QUrl("https://buza.dev"))
 
     def _quit(self):
         manager = getattr(self, "_manager_dlg", None)
